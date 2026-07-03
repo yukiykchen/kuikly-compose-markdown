@@ -1,0 +1,49 @@
+[versions]
+# 以下版本号为1的是占位版本号，具体设置在version.compat.gradle.kts里
+agp = "1"
+kotlin = "1"
+compose-multiplatform = "1"
+kuikly = "1"
+kuikly-compose = "1"
+kuikly-short = "1"
+ksp = "1"
+
+appcompat = "1.2.0"
+kotlinStdlib = "2.0.21"
+kotlinTest = "2.0.21"
+
+[libraries]
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-recyclerview = { group = "androidx.recyclerview", name = "recyclerview", version = "1.2.0" }
+
+kotlin-test = { group = "org.jetbrains.kotlin", name = "kotlin-test", version.ref = "kotlinTest" }
+
+androidx-dynamicanimation = { module = "androidx.dynamicanimation:dynamicanimation", version = "1.0.0" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version = "1.6.0" }
+kotlinx-collections-immutable = { group = "org.jetbrains.kotlinx", name = "kotlinx-collections-immutable", version = "0.6.4" }
+kotlin-stdlib = { group = "org.jetbrains.kotlin", name = "kotlin-stdlib", version.ref = "kotlinStdlib" }
+
+kuikly-core-render-android = { module = "com.tencent.kuikly-open:core-render-android", version.ref = "kuikly-short" }
+kuikly-compose = { module = "com.tencent.kuikly-open:compose", version.ref = "kuikly-compose" }
+kuikly-core-annotation = { module = "com.tencent.kuikly-open:core-annotations", version.ref = "kuikly" }
+
+jetbrains-markdown = { module = "org.jetbrains:markdown", version = "0.7.3" }
+
+kotlin-gradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+android-gradlePlugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
+android-gradlePluginApi = { module = "com.android.tools.build:gradle-api", version.ref = "agp" }
+
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+
+# nt-compose
+kotlin-compose = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
+kuikly = { id = "kuikly", version.ref = "kuikly" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+kotlinCocoapods = { id = "org.jetbrains.kotlin.native.cocoapods", version.ref = "kotlin" }
+
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+
