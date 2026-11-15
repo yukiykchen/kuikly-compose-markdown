@@ -25,6 +25,7 @@ import com.tencent.kuiklybase.markdown.model.NoOpImageTransformerImpl
 import com.tencent.kuiklybase.markdown.model.NoOpTextProvider
 import com.tencent.kuiklybase.markdown.model.ReferenceLinkHandler
 import com.tencent.kuiklybase.markdown.model.ReferenceLinkHandlerImpl
+import com.tencent.kuiklybase.markdown.model.StreamingMarkdownState
 import com.tencent.kuiklybase.markdown.model.TextProvider
 import com.tencent.kuiklybase.markdown.model.markdownAnimations
 import com.tencent.kuiklybase.markdown.model.markdownAnnotator
@@ -32,8 +33,11 @@ import com.tencent.kuiklybase.markdown.model.markdownDimens
 import com.tencent.kuiklybase.markdown.model.markdownExtendedSpans
 import com.tencent.kuiklybase.markdown.model.markdownPadding
 import com.tencent.kuiklybase.markdown.model.rememberMarkdownState
+import com.tencent.kuiklybase.markdown.model.DefaultMarkdownColors
+import com.tencent.kuiklybase.markdown.model.DefaultMarkdownTypography
 import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import org.intellij.markdown.parser.CancellationToken
 import org.intellij.markdown.parser.MarkdownParser
 
 
@@ -63,29 +67,29 @@ import org.intellij.markdown.parser.MarkdownParser
 @Composable
 fun Markdown(
     content: String,
-    colors: MarkdownColors,
-    typography: MarkdownTypography,
+    colors: MarkdownColors = remember { DefaultMarkdownColors() },
+    typography: MarkdownTypography = remember { DefaultMarkdownTypography() },
     modifier: Modifier = Modifier.fillMaxSize(),
     padding: MarkdownPadding = markdownPadding(),
     dimens: MarkdownDimens = markdownDimens(),
-    flavour: MarkdownFlavourDescriptor = GFMFlavourDescriptor(),
-    parser: MarkdownParser = MarkdownParser(flavour),
+    flavour: MarkdownFlavourDescriptor = remember { GFMFlavourDescriptor() },
+    parser: MarkdownParser = remember(flavour) { MarkdownParser(flavour, cancellationToken = CancellationToken.NonCancellable) },
     imageTransformer: ImageTransformer = NoOpImageTransformerImpl(),
     imageLinkHandler: ImageLinkHandler = ImageLinkHandlerImpl(),
     textProvider: TextProvider = NoOpTextProvider(),
     annotator: MarkdownAnnotator = markdownAnnotator(),
     extendedSpans: MarkdownExtendedSpans = markdownExtendedSpans(),
-    components: MarkdownComponents = markdownComponents(),
+    components: MarkdownComponents = remember { markdownComponents() },
     animations: MarkdownAnimations = markdownAnimations(),
-    referenceLinkHandler: ReferenceLinkHandler = ReferenceLinkHandlerImpl(),
+    referenceLinkHandler: ReferenceLinkHandler = remember { ReferenceLinkHandlerImpl() },
     loading: @Composable (modifier: Modifier) -> Unit = { Box(modifier = modifier) },
     success: @Composable (state: MarkdownState, components: MarkdownComponents, modifier: Modifier) -> Unit = { state, components, modifier ->
         MarkdownSuccess(state = state, components = components, modifier = modifier)
     },
     error: @Composable (modifier: Modifier) -> Unit = { Box(modifier = modifier) },
 ) {
-    val state = rememberMarkdownState()
-    LaunchedEffect(content) {
+    val state = rememberMarkdownState(flavour = flavour, parser = parser, referenceLinkHandler = referenceLinkHandler)
+    LaunchedEffect(content, state) {
         state.parse(content, false)
     }
 
@@ -133,8 +137,8 @@ fun Markdown(
 @Composable
 fun Markdown(
     state: MarkdownState,
-    colors: MarkdownColors,
-    typography: MarkdownTypography,
+    colors: MarkdownColors = remember { DefaultMarkdownColors() },
+    typography: MarkdownTypography = remember { DefaultMarkdownTypography() },
     modifier: Modifier = Modifier.fillMaxSize(),
     padding: MarkdownPadding = markdownPadding(),
     dimens: MarkdownDimens = markdownDimens(),
@@ -143,9 +147,9 @@ fun Markdown(
     textProvider: TextProvider = NoOpTextProvider(),
     annotator: MarkdownAnnotator = markdownAnnotator(),
     extendedSpans: MarkdownExtendedSpans = markdownExtendedSpans(),
-    components: MarkdownComponents = markdownComponents(),
+    components: MarkdownComponents = remember { markdownComponents() },
     animations: MarkdownAnimations = markdownAnimations(),
-    referenceLinkHandler: ReferenceLinkHandler = ReferenceLinkHandlerImpl(),
+    referenceLinkHandler: ReferenceLinkHandler = state.referenceLinkHandler,
     loading: @Composable (modifier: Modifier) -> Unit = { Box(modifier = modifier) },
     success: @Composable (state: MarkdownState, components: MarkdownComponents, modifier: Modifier) -> Unit = { state, components, modifier ->
         MarkdownSuccess(state = state, components = components, modifier = modifier)
@@ -172,6 +176,57 @@ fun Markdown(
 }
 
 /**
+ * Renders append-only streaming Markdown using the snapshot's stable AST and
+ * unstable tail. The default success slot uses [LazyMarkdownSuccess] so only
+ * visible blocks are composed.
+ */
+@Composable
+fun Markdown(
+    streamingMarkdownState: StreamingMarkdownState,
+    colors: MarkdownColors = remember { DefaultMarkdownColors() },
+    typography: MarkdownTypography = remember { DefaultMarkdownTypography() },
+    modifier: Modifier = Modifier.fillMaxSize(),
+    padding: MarkdownPadding = markdownPadding(),
+    dimens: MarkdownDimens = markdownDimens(),
+    imageTransformer: ImageTransformer = NoOpImageTransformerImpl(),
+    imageLinkHandler: ImageLinkHandler = ImageLinkHandlerImpl(),
+    textProvider: TextProvider = NoOpTextProvider(),
+    annotator: MarkdownAnnotator = markdownAnnotator(),
+    extendedSpans: MarkdownExtendedSpans = markdownExtendedSpans(),
+    components: MarkdownComponents = remember { markdownComponents() },
+    animations: MarkdownAnimations = markdownAnimations(),
+    referenceLinkHandler: ReferenceLinkHandler = streamingMarkdownState.referenceLinkHandler,
+    success: @Composable (state: StreamingMarkdownState, components: MarkdownComponents, modifier: Modifier) -> Unit =
+        { state, markdownComponents, successModifier ->
+            LazyMarkdownSuccess(
+                streamingMarkdownState = state,
+                components = markdownComponents,
+                modifier = successModifier,
+                precomposeAll = true,
+                singleItem = true,
+            )
+        },
+) {
+    CompositionLocalProvider(
+        LocalReferenceLinkHandler provides referenceLinkHandler,
+        LocalMarkdownRenderCache provides streamingMarkdownState.renderCache,
+        LocalMarkdownPadding provides padding,
+        LocalMarkdownDimens provides dimens,
+        LocalMarkdownColors provides colors,
+        LocalMarkdownTypography provides typography,
+        LocalImageTransformer provides imageTransformer,
+        LocalImageLinkHandler provides imageLinkHandler,
+        LocalTextProvider provides textProvider,
+        LocalMarkdownAnnotator provides annotator,
+        LocalMarkdownExtendedSpans provides extendedSpans,
+        LocalMarkdownComponents provides components,
+        LocalMarkdownAnimations provides animations,
+    ) {
+        success(streamingMarkdownState, components, modifier)
+    }
+}
+
+/**
  * Renders the parsed markdown content.
  *
  * @param state The success markdown state.
@@ -186,7 +241,7 @@ fun MarkdownSuccess(
 ) {
     val content = { state.getContent() }
     val skipLinkDefinition = state.skipLinkDefinition()
-    val rememberedComponents = remember { components }
+    val rememberedComponents = components
     Column(modifier = modifier) {
         state.nodeListState.forEachIndexed { index, result ->
             handleElement(

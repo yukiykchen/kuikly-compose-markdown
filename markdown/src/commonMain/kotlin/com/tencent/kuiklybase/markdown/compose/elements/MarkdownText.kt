@@ -26,7 +26,7 @@ import com.tencent.kuikly.core.base.Size
 import com.tencent.kuiklybase.markdown.utils.MARKDOWN_TAG_IMAGE_URL
 import com.tencent.kuiklybase.markdown.annotator.AnnotatorSettings
 import com.tencent.kuiklybase.markdown.annotator.annotatorSettings
-import com.tencent.kuiklybase.markdown.annotator.buildMarkdownAnnotatedString
+import com.tencent.kuiklybase.markdown.annotator.cachedMarkdownAnnotatedString
 import com.tencent.kuiklybase.markdown.compose.LocalImageLinkHandler
 import com.tencent.kuiklybase.markdown.compose.LocalImageTransformer
 import com.tencent.kuiklybase.markdown.compose.LocalMarkdownAnimations
@@ -64,15 +64,12 @@ fun MarkdownText(
     annotatorSettings: AnnotatorSettings = annotatorSettings(),
 ) {
     val childNode = contentChildType?.run(node::findChildOfType) ?: node
-    val styledText = buildAnnotatedString {
-        pushStyle(style.toSpanStyle())
-        buildMarkdownAnnotatedString(
-            content = content,
-            node = childNode,
-            annotatorSettings = annotatorSettings
-        )
-        pop()
-    }
+    val styledText = cachedMarkdownAnnotatedString(
+        content = content,
+        textNode = childNode,
+        style = style,
+        annotatorSettings = annotatorSettings,
+    )
 
     MarkdownText(styledText, modifier = modifier, style = style, annotatorSettings = annotatorSettings)
 }
@@ -87,7 +84,7 @@ fun MarkdownText(
 ) {
     // extend the annotated string with `extended-spans` styles if provided
     val extendedStyledText = if (extendedSpans != null) {
-        remember(content) {
+        remember(content, extendedSpans) {
             extendedSpans.extend(content)
         }
     } else {
@@ -108,7 +105,13 @@ fun MarkdownText(
         modifier.drawBehind(extendedSpans)
     } else modifier
 
-    MarkdownText(content = extendedStyledText, modifier = extendedModifier, style = style, onTextLayout = onTextLayout)
+    MarkdownText(
+        content = extendedStyledText,
+        modifier = extendedModifier,
+        style = style,
+        onTextLayout = onTextLayout,
+        annotatorSettings = annotatorSettings,
+    )
 }
 
 @Composable
@@ -124,6 +127,29 @@ fun MarkdownText(
     val baseColor = LocalMarkdownColors.current.text
     val animations = LocalMarkdownAnimations.current
     val transformer = LocalImageTransformer.current
+    val extendedInlineContent = annotatorSettings.annotator.inlineContent?.invoke()
+
+    // Only text carrying inline image/ref markers needs the image state,
+    // placeholder derivation and onPlaced/onTextLayout state writes.
+    val hasInlineMarkers = content.getStringAnnotations(
+        0,
+        content.text.length,
+    ).any { annotation ->
+        annotation.item == MARKDOWN_TAG_IMAGE_URL ||
+            annotation.item == com.tencent.kuiklybase.markdown.utils.MARKDOWN_TAG_REF_URL
+    }
+    if (!hasInlineMarkers && onTextLayout == null && extendedInlineContent.isNullOrEmpty()) {
+        MarkdownBasicText(
+            text = content,
+            maxLines = maxLines,
+            overflow = overflow,
+            modifier = modifier,
+            style = style,
+            inlineContent = emptyMap(),
+            onTextLayout = {},
+        )
+        return
+    }
 
     val layoutResult: MutableState<TextLayoutResult?> = remember { mutableStateOf(null) }
     val imageState = rememberMarkdownImageState()
@@ -140,7 +166,6 @@ fun MarkdownText(
     val inlineContent = mutableMapOf(
         MARKDOWN_TAG_IMAGE_URL to createImageInlineTextContent(placeholderState, transformer)
     )
-    val extendedInlineContent: Map<String, InlineTextContent>? = annotatorSettings.annotator.inlineContent?.invoke()
     if (extendedInlineContent != null) {
         inlineContent.putAll(extendedInlineContent)
     }
@@ -153,7 +178,7 @@ fun MarkdownText(
             .onPlaced { it ->
                 imageState.updateContainerSize(Size(it.size.width.toFloat(), it.size.height.toFloat()))
             }
-            .also {
+            .let {
                 @Suppress("DEPRECATION")
                 if (placeholderState.animate) animations.animateTextSize(it) else it
             },

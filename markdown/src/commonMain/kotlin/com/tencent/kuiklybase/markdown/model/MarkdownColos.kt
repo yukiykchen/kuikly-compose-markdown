@@ -44,23 +44,31 @@ interface MarkdownColors {
 
     /** Represents the color used for the stroke of tables. */
     val tableStroke: Color
+
+    /** Left accent bar of block quotes. [Color.Unspecified] falls back to [MarkdownTypography.quote] text color. */
+    val blockQuoteBar: Color
+
+    /** Background behind block quote content. [Color.Unspecified] means transparent. */
+    val blockQuoteBackground: Color
 }
 
 @Immutable
 class DefaultMarkdownColors(
-    override val text: Color,
+    override val text: Color = Color(0xFF333333),
     @Deprecated("Set color via `codeText` textStyle via `MarkdownTypography` instead")
-    override val codeText: Color,
-    @Deprecated("Set color via `inlineCode` textStyle via `Ma    val tableHeaderBackground = LocalMarkdownColors.current.tableHeaderBackground\nrkdownTypography` instead")
-    override val inlineCodeText: Color,
+    override val codeText: Color = Color.Unspecified,
+    @Deprecated("Set color via `inlineCode` textStyle via `MarkdownTypography` instead")
+    override val inlineCodeText: Color = Color.Unspecified,
     @Deprecated("Set color via `linkText` textStyle via `MarkdownTypography` instead")
-    override val linkText: Color,
-    override val codeBackground: Color,
-    override val inlineCodeBackground: Color,
-    override val dividerColor: Color,
+    override val linkText: Color = Color.Unspecified,
+    override val codeBackground: Color = Color(0xFFF5F5F5),
+    override val inlineCodeBackground: Color = codeBackground,
+    override val dividerColor: Color = Color(0xFFE0E0E0),
     @Deprecated("Set color via `tableText` textStyle via `MarkdownTypography` instead")
-    override val tableText: Color,
-    override val tableBackground: Color,
-    override val tableHeaderBackground: Color,
-    override val tableStroke: Color
+    override val tableText: Color = Color.Unspecified,
+    override val tableBackground: Color = Color(0xFFF5F5F5),
+    override val tableHeaderBackground: Color = Color(0xFFEEEEEE),
+    override val tableStroke: Color = dividerColor,
+    override val blockQuoteBar: Color = Color.Unspecified,
+    override val blockQuoteBackground: Color = Color.Unspecified,
 ) : MarkdownColors

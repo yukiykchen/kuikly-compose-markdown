@@ -36,8 +36,8 @@ import org.intellij.markdown.MarkdownElementTypes.PARAGRAPH
 import org.intellij.markdown.MarkdownElementTypes.UNORDERED_LIST
 import org.intellij.markdown.MarkdownTokenTypes.Companion.LIST_BULLET
 import org.intellij.markdown.MarkdownTokenTypes.Companion.LIST_NUMBER
-import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.findChildOfType
+import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes.CHECK_BOX
 
 /** key used to store the current depth in the [MarkdownComponentModel.extra] */
@@ -72,7 +72,7 @@ fun MarkdownListItems(
             when (child.type) {
                 MarkdownElementTypes.LIST_ITEM -> {
                     // LIST_NUMBER/LIST_BULLET, CHECK_BOX, PARAGRAPH
-                    val checkboxNode = child.children.getOrNull(1)?.takeIf { it.type == CHECK_BOX }
+                    val checkboxNode = child.findChildOfType(CHECK_BOX)
                     val listIndicator = when (node.type) {
                         ORDERED_LIST -> child.findChildOfType(LIST_NUMBER)
                         UNORDERED_LIST -> child.findChildOfType(LIST_BULLET)
@@ -96,6 +96,8 @@ fun MarkdownListItems(
                         Column(modifier = listModifier()) {
                             child.children.onEach { nestedChild ->
                                 when (nestedChild.type) {
+                                    CHECK_BOX, LIST_BULLET, LIST_NUMBER -> Unit
+
                                     ORDERED_LIST -> {
                                         val model = MarkdownComponentModel(
                                             content = content,

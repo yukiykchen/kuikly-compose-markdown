@@ -1,10 +1,12 @@
 package com.tencent.kuiklybase.markdown.compose.elements
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import com.tencent.kuikly.compose.foundation.BorderStroke
 import com.tencent.kuikly.compose.foundation.background
 import com.tencent.kuikly.compose.foundation.border
 import com.tencent.kuikly.compose.foundation.layout.Box
+import com.tencent.kuikly.compose.foundation.layout.Column
 import com.tencent.kuikly.compose.foundation.layout.fillMaxWidth
 import com.tencent.kuikly.compose.foundation.layout.padding
 import com.tencent.kuikly.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +34,7 @@ fun MarkdownCode(
     code: String,
     language: String?,
     style: TextStyle = LocalMarkdownTypography.current.code,
+    chunkCharacters: Int = 4096,
 ) {
     val backgroundCodeColor = LocalMarkdownColors.current.codeBackground
     val codeBackgroundCornerSize = LocalMarkdownDimens.current.codeBackgroundCornerSize
@@ -41,19 +44,48 @@ fun MarkdownCode(
         shape = RoundedCornerShape(codeBackgroundCornerSize),
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
     ) {
-        MarkdownBasicText(
-            text = code,
-            color = LocalMarkdownColors.current.codeText,
-            style = style,
-            modifier = Modifier/*.horizontalScroll(rememberScrollState())*/
-                .padding(
+        Column(
+            modifier = Modifier.padding(
                     start = codeBlockPadding.calculateLeftPadding(LayoutDirection.Ltr),
                     end = codeBlockPadding.calculateRightPadding(LayoutDirection.Ltr),
                     top = codeBlockPadding.calculateTopPadding(),
                     bottom = codeBlockPadding.calculateBottomPadding(),
                 ),
-        )
+        ) {
+            splitMarkdownCodeLines(code, chunkCharacters).forEachIndexed { index, text ->
+                key(index) {
+                    MarkdownBasicText(
+                        text = text,
+                        color = LocalMarkdownColors.current.codeText,
+                        style = style,
+                        modifier = Modifier,
+                    )
+                }
+            }
+        }
     }
+}
+
+/** Split only between complete lines: joining the chunks with LF reproduces the input exactly. */
+internal fun splitMarkdownCodeLines(code: String, chunkCharacters: Int): List<String> {
+    require(chunkCharacters > 0)
+    if (code.length <= chunkCharacters) return listOf(code)
+    val chunks = mutableListOf<String>()
+    var current = StringBuilder()
+    var lineCount = 0
+    code.splitToSequence('\n').forEach { line ->
+        val separator = if (lineCount == 0) 0 else 1
+        if (lineCount > 0 && current.length.toLong() + separator + line.length > chunkCharacters) {
+            chunks.add(current.toString())
+            current = StringBuilder()
+            lineCount = 0
+        }
+        if (lineCount > 0) current.append('\n')
+        current.append(line)
+        lineCount++
+    }
+    chunks.add(current.toString())
+    return chunks
 }
 
 @Composable

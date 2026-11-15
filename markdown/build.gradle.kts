@@ -7,6 +7,7 @@ import com.tencent.kuiklybase.signPublicationIfKeyPresent
 
 plugins {
     kotlin("multiplatform")
+    kotlin("plugin.compose")
     id("com.android.library")
     id("com.google.devtools.ksp")
     id("org.jetbrains.compose")
@@ -15,19 +16,26 @@ plugins {
 }
 
 group = "com.tencent.kuiklybase"
-version = "0.4.1"
+version = "0.4.3"
 
 publishing {
     repositories {
-        val username = MavenConfig.getUsername(project)
-        val password = MavenConfig.getPassword(project)
-        if (username.isNotEmpty() && password.isNotEmpty()) {
+        val username = (project.findProperty("mavenUserName") as? String)
+            ?: System.getenv("mavenUserName")
+            ?: MavenConfig.getUsername(project)
+        val password = (project.findProperty("mavenPassword") as? String)
+            ?: System.getenv("mavenPassword")
+            ?: MavenConfig.getPassword(project)
+        val repoUrl = (project.findProperty("repoUrl") as? String)
+            ?: System.getenv("KUIKLY_MAVEN_REPO_URL")
+            ?: ""
+        if (username.isNotEmpty() && password.isNotEmpty() && repoUrl.isNotEmpty()) {
             maven {
                 credentials {
                     setUsername(username)
                     setPassword(password)
                 }
-                url = uri(MavenConfig.getRepoUrl(version as String))
+                url = uri(repoUrl)
             }
         } else {
             mavenLocal()
@@ -68,15 +76,19 @@ kotlin {
 
     js(IR) {
         browser()
+        nodejs()
     }
 
     val commonMain by sourceSets.getting {
 
         dependencies {
-                compileOnly(libs.kotlin.stdlib)
+                implementation(libs.kotlin.stdlib)
+                api(libs.kotlinx.coroutines.core)
 
-                compileOnly(libs.kuikly.compose)
-                compileOnly(libs.kuikly.core.annotation)
+                api(libs.kuikly.compose)
+                implementation("org.jetbrains.kotlinx:atomicfu:0.25.0") {
+                    exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
+                }
 
                 val markdownDep = libs.jetbrains.markdown.get().let { "${it.module}:${it.version}" }
                 api(markdownDep) {
@@ -85,17 +97,32 @@ kotlin {
             }
     }
 
-    sourceSets.iosMain {
-        dependsOn(commonMain)
+    val androidUnitTest by sourceSets.getting {
+        dependencies {
+            implementation(libs.kotlin.test)
+            implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kuikly.compose)
+            implementation(libs.kuikly.core.annotation)
+        }
     }
+
+    val jsTest by sourceSets.getting {
+        dependencies {
+            implementation(libs.kotlin.test)
+            implementation(libs.kuikly.compose)
+            implementation(libs.kuikly.core.annotation)
+        }
+    }
+
 }
 
 android {
     namespace = "com.tencent.kuiklybase.markdown"
-    compileSdk = 30
+    compileSdk = 34
+    testOptions.unitTests.isReturnDefaultValues = true
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
         minSdk = 21
-        targetSdk = 30
+        targetSdk = 34
     }
 }

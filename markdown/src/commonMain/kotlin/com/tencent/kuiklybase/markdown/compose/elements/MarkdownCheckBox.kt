@@ -5,7 +5,9 @@ import com.tencent.kuikly.compose.foundation.layout.Row
 import com.tencent.kuikly.compose.foundation.layout.padding
 import com.tencent.kuikly.compose.foundation.layout.wrapContentWidth
 import com.tencent.kuikly.compose.ui.Modifier
+import com.tencent.kuikly.compose.ui.graphics.Color
 import com.tencent.kuikly.compose.ui.text.TextStyle
+import com.tencent.kuikly.compose.ui.text.font.FontWeight
 import com.tencent.kuikly.compose.ui.unit.dp
 import com.tencent.kuiklybase.markdown.compose.elements.material.MarkdownBasicText
 import org.intellij.markdown.ast.ASTNode
@@ -18,9 +20,12 @@ fun MarkdownCheckBox(
     style: TextStyle,
     checkedIndicator: @Composable (Boolean, Modifier) -> Unit = { checked, modifier ->
         MarkdownBasicText(
-            text = "[${if (checked) "x" else " "}] ",
+            text = if (checked) "☑" else "☐",
             modifier = modifier,
-            style = style
+            style = style.copy(
+                color = if (checked) Color(0xFF52C41A) else Color(0xFF8C8C8C),
+                fontWeight = FontWeight.Medium,
+            ),
         )
     },
 ) {

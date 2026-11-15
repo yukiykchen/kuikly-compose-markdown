@@ -3,6 +3,7 @@ package com.tencent.kuiklybase.markdown.annotator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import com.tencent.kuikly.compose.ui.text.LinkAnnotation
 import com.tencent.kuikly.compose.ui.text.LinkInteractionListener
@@ -52,22 +53,33 @@ fun annotatorSettings(
     referenceLinkHandler: ReferenceLinkHandler? = LocalReferenceLinkHandler.current,
     uriHandler: UriHandler = LocalUriHandler.current,
     scope: CoroutineScope = rememberCoroutineScope(),
-    linkInteractionListener: LinkInteractionListener? = LinkInteractionListener { link ->
+    linkInteractionListener: LinkInteractionListener? = null,
+): AnnotatorSettings = remember(
+    linkTextSpanStyle,
+    codeSpanStyle,
+    annotator,
+    referenceLinkHandler,
+    uriHandler,
+    scope,
+    linkInteractionListener,
+) {
+    val defaultLinkInteractionListener = LinkInteractionListener { link ->
         val annotationUrl = (link as? LinkAnnotation.Url)?.url
         if (annotationUrl != null) {
             val foundReference = referenceLinkHandler?.find(annotationUrl)?.takeIf { it.isNotEmpty() } ?: annotationUrl
-            // wait for finger up to navigate to the link
             try {
                 scope.launch { uriHandler.openUri(foundReference) }
             } catch (t: Throwable) {
                 println("Could not open the provided url: $foundReference // ${t.message}")
             }
         }
-    },
-): AnnotatorSettings = DefaultAnnotatorSettings(
-    linkTextSpanStyle = linkTextSpanStyle,
-    codeSpanStyle = codeSpanStyle,
-    annotator = annotator,
-    referenceLinkHandler = referenceLinkHandler,
-    linkInteractionListener = linkInteractionListener,
-)
+    }
+    val effectiveLinkInteractionListener = linkInteractionListener ?: defaultLinkInteractionListener
+    DefaultAnnotatorSettings(
+        linkTextSpanStyle = linkTextSpanStyle,
+        codeSpanStyle = codeSpanStyle,
+        annotator = annotator,
+        referenceLinkHandler = referenceLinkHandler,
+        linkInteractionListener = effectiveLinkInteractionListener,
+    )
+}

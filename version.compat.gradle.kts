@@ -20,24 +20,24 @@ val KUIKLY_SHORT = "kuikly-short"
 val versions = hashMapOf(
     // android 产物编译环境
     BUILD_TYPE_ANDROID to mutableMapOf(
-        AGP to "7.4.2",
-        KOTLIN to "1.9.22",
-        KSP to "1.9.22-1.0.18",
+        AGP to "8.6.1",
+        KOTLIN to "2.1.21",
+        KSP to "2.1.21-2.0.1",
         COMPOSE to "1.7.3",
-        KUIKLY_COMPOSE to "2.12.0-1.9.22",
-        KUIKLY to "2.12.0-1.9.22",
-        KUIKLY_SHORT to "2.12.0-1.9.22"
+        KUIKLY_COMPOSE to "2.30.0-2.1.21",
+        KUIKLY to "2.30.0-2.1.21",
+        KUIKLY_SHORT to "2.30.0"
     ),
 
     // iOS 产物编译环境
     BUILD_TYPE_IOS to mutableMapOf(
-        AGP to "7.4.2",
-        KOTLIN to "1.9.22",
-        KSP to "1.9.22-1.0.18",
+        AGP to "8.6.1",
+        KOTLIN to "2.1.21",
+        KSP to "2.1.21-2.0.1",
         COMPOSE to "1.7.3",
-        KUIKLY_COMPOSE to "2.12.0-1.9.22",
-        KUIKLY to "2.12.0-1.9.22",
-        KUIKLY_SHORT to "2.12.0-1.9.22"
+        KUIKLY_COMPOSE to "2.30.0-2.1.21",
+        KUIKLY to "2.30.0-2.1.21",
+        KUIKLY_SHORT to "2.30.0"
     ),
 
     // ohos 产物编译环境

@@ -28,7 +28,6 @@ private class DefaultMarkdownDimens(
     override val tableCornerSize: Dp,
 ) : MarkdownDimens
 
-@Composable
 fun markdownDimens(
     dividerThickness: Dp = 0.5.dp,
     codeBackgroundCornerSize: Dp = 8.dp,

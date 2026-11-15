@@ -13,7 +13,8 @@ interface IComposePageDelegate {
         pageName: String,
         modules: Map<String, KuiklyRenderBaseModule> = emptyMap(),
         onFirstFrame: (() -> Unit)? = null,
-        size: Size? = null
+        size: Size? = null,
+        pageData: Map<String, Any> = emptyMap(),
     )
 
     fun onResume()

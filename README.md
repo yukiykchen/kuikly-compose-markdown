@@ -7,7 +7,6 @@
 [![KMP](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin)](https://kotlinlang.org/docs/multiplatform.html)
 [![Android](https://img.shields.io/badge/Android-✓-3DDC84?logo=android)](https://developer.android.com)
 [![iOS](https://img.shields.io/badge/iOS-✓-000000?logo=apple)](https://developer.apple.com)
-[![HarmonyOS](https://img.shields.io/badge/HarmonyOS-✓-000000)](https://developer.harmonyos.com)
 
 </div>
 
@@ -34,19 +33,19 @@
 | 平台 | 支持 |
 |------|------|
 | Android | ✅ |
-| iOS | ✅ |
-| HarmonyOS (OHOS) | ✅ |
-| macOS | ✅ |
-| JS | ✅ |
+| iOS | 编译产物已发布，未做本轮 UI 运行验证 |
+| HarmonyOS (OHOS) | 标准 0.4.3 不含 OHOS target，不提供 0.4.3-ohos 坐标 |
+| macOS | 编译产物已发布，未做本轮 UI 运行验证 |
+| JS | parser/state Node 运行测试通过，未做完整 UI 运行验证 |
 
 ## 快速开始
 
 ### 1. 添加 Maven 仓库
 
 ```kotlin
-// settings.gradle.kts
+// settings.gradle.kts 的 dependencyResolutionManagement.repositories
 repositories {
-    maven("https://mirrors.tencent.com/nexus/repository/maven-public/")
+    maven("https://mirrors.tencent.com/nexus/repository/maven-tencent/")
 }
 ```
 
@@ -56,12 +55,19 @@ repositories {
 // build.gradle.kts
 dependencies {
     // Android / iOS / macOS / JS
-    implementation("com.tencent.kuiklybase:markdown:0.4.1")
-    
-    // HarmonyOS
-    implementation("com.tencent.kuiklybase:markdown:0.4.1-ohos")
+    implementation("com.tencent.kuiklybase:markdown:0.4.3")
 }
 ```
+
+`0.4.3` 已发布到公共仓库，可直接按上述仓库地址解析，不需要 `mavenLocal()`。
+远端 `0.4.2` 是不可变的旧版本，存在会话重置、链接失效等问题，新接入应使用 `0.4.3`。
+`maven-metadata.xml` 的 `latest/release` 均为 `0.4.3`；已用禁用 `mavenLocal()` 的最小工程验证 `:app:assembleDebug`，依赖树为 `markdown-android:0.4.3 -> org.jetbrains:markdown:0.7.18`。
+
+标准 Android / Kuikly 2.30 的 release 接入与模拟器真实 SSE、多轮、Stop、旋转恢复已通过，35 个 JVM/Android 回归及 JS Node 运行测试通过。当前没有已知阻断该范围接入的审查项，完整证据与资源边界见 [PRODUCTION_REVIEW.md](PRODUCTION_REVIEW.md)。这不代表 OHOS、所有宿主或无限输入都经过验证。
+
+当前标准构建使用 Kotlin 2.1.21、Kuikly Compose 2.30.0、AGP 8.6.1 和 Gradle 8.7。
+Compose 与协程依赖作为公共 API 传递；宿主仍需要对应的 Kuikly 原生 render 容器。
+0.4.3 不承诺与旧 Kotlin 1.9.22 / Kuikly 2.12 的二进制兼容。
 
 ## 使用示例
 
@@ -116,24 +122,68 @@ fun StyledMarkdown(content: String) {
 }
 ```
 
-### AI 对话流式渲染
+### 静态文档 / 全量更新
 
 ```kotlin
 @Composable
-fun StreamingMarkdown(streamingText: String) {
+fun StaticMarkdown(content: String) {
     val markdownState = rememberMarkdownState()
-
-    // 每次文本更新时重新解析
-    LaunchedEffect(streamingText) {
-        markdownState.parse(streamingText, false)
+    LaunchedEffect(content) {
+        markdownState.parse(content, false)
     }
-
-    Markdown(
-        state = markdownState,
-        modifier = Modifier.padding(horizontal = 24.dp)
-    )
+    Markdown(state = markdownState)
 }
 ```
+
+`Markdown(content)` / `MarkdownState.parse(content)` 适合一次性文档或非 append-only 文本替换。
+
+### AI 对话流式渲染（推荐）
+
+```kotlin
+import com.tencent.kuiklybase.markdown.compose.StreamingMarkdownContent
+import com.tencent.kuiklybase.markdown.model.rememberStreamingMarkdownState
+import com.tencent.kuiklybase.markdown.model.bufferMarkdownChunks
+
+@Composable
+fun StreamingAnswer(deltas: Flow<String>) {
+    val state = rememberStreamingMarkdownState()
+
+    LaunchedEffect(deltas) {
+        state.reset()
+        deltas.bufferMarkdownChunks().collect { delta -> state.append(delta) }
+        state.finish() // flush CRLF 边界并做一次完整 parse 校验
+    }
+
+    StreamingMarkdownContent(state)
+}
+```
+
+要点：`append()` 只接受 append-only delta，不传完整前缀；`finish()` 必须调用且可重复调用；完成后再次追加必须先 `reset()`。生产环境保持 `diagnosticsEnabled = false`。网络 delta 以 33-50ms 合并后再 `append()`；巨大未闭合代码块/表格会扩大 active tail，demo 在 16K/64K 尾部时采用 100/200ms 的发布间隔。取消/解析失败后先 `reset()` 再开始新会话，不继续使用已取消的解析器。
+
+`StreamingMarkdownContent(state)` 可直接使用默认样式，会提供该文档独立的链接处理器与缓存；有主题需求时用 `Markdown(state, colors, typography)` 或 CompositionLocal 覆盖。聊天页外层使用一个对话 `LazyColumn`，每条回答一个 item；非滚动的 `StreamingMarkdownContent` 不会引入嵌套 LazyColumn。
+
+历史回答保存 `state.finish()` 返回的快照，并用 `MarkdownSnapshotContent(snapshot)` 渲染；重置/继续其他会话不会修改快照内容和引用定义。默认单 item 是全量挂载，不是无限规模虚拟化；超大文档可用逐块 `LazyMarkdownSuccess`，宿主须提供有界高度。
+
+自定义 `ReferenceLinkHandler` 必须实现 `clear()`，方法须线程安全且不可阻塞。UI 风格、宽度及组件配置发生合法变化时允许重新组合/布局，不应把这种必要工作算成性能回归。
+
+流式默认预算为文档 1,000,000 字符、待重新解析的尾部 262,144 字符，可通过 `StreamingMarkdownLimits` 调整。
+超出预算会抛出明确异常并保留最后已发布画面，不静默截断；失败后先 `reset()`。宿主应处理异常、限制模型输出，并按设备资源配置预算。
+增量 parser 仍会重解析未闭合的大块，预算与合帧是资源保护，不代表任意长度的未闭合 Markdown 都能保持固定帧耗时。
+
+`Flow.collectAsStreamingMarkdownState()` 自动合并输入；上游失败时完成已收到的部分正文并写入 `state.error`，不从内部 effect 抛出未处理异常。取消仍按协程约定传播。直接调用 `append()` / `finish()` 的业务代码仍应捕获异常。
+
+诊断模式仅在性能调查时开启：
+
+```kotlin
+val state = rememberStreamingMarkdownState(diagnosticsEnabled = true)
+StreamingMarkdownContent(state, diagnosticsEnabled = true)
+```
+
+诊断模式会暴露重组计数、记录稳定区测量并允许 demo 侧启用 Kuikly `RecompositionProfiler`；它不是生产默认路径，不应在业务包中长期开启。
+
+## 发布验证
+
+`0.4.3` 公共 Maven 发布已验证根 POM、Android POM/module/AAR 以及 iOS/macOS/JS 平台 POM 可下载；远端 AAR 与本地 release AAR SHA-256 一致：`3e5ddd35d7bc5f6eb27e4177b1240f2bed9b50218397d5145c06e7d5c413892c`。发布记录见 [PRODUCTION_RELEASE_CHECKLIST.md](PRODUCTION_RELEASE_CHECKLIST.md)。
 
 ## API 参考
 

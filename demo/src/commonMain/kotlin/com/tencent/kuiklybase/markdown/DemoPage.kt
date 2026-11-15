@@ -2,10 +2,9 @@ package com.tencent.kuiklybase.markdown
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.tencent.kuikly.compose.ComposeContainer
 import com.tencent.kuikly.compose.foundation.background
 import com.tencent.kuikly.compose.foundation.layout.Arrangement
@@ -17,7 +16,6 @@ import com.tencent.kuikly.compose.foundation.layout.fillMaxWidth
 import com.tencent.kuikly.compose.foundation.layout.height
 import com.tencent.kuikly.compose.foundation.layout.padding
 import com.tencent.kuikly.compose.foundation.layout.wrapContentHeight
-import com.tencent.kuikly.compose.foundation.lazy.LazyColumn
 import com.tencent.kuikly.compose.material3.Button
 import com.tencent.kuikly.compose.material3.Text
 import com.tencent.kuikly.compose.setContent
@@ -27,18 +25,19 @@ import com.tencent.kuikly.compose.ui.graphics.Color
 import com.tencent.kuikly.compose.ui.platform.LocalConfiguration
 import com.tencent.kuikly.compose.ui.unit.dp
 import com.tencent.kuikly.core.annotations.Page
-import com.tencent.kuiklybase.markdown.model.rememberMarkdownState
+import com.tencent.kuiklybase.markdown.model.StreamingMarkdownState
+import com.tencent.kuiklybase.markdown.model.rememberStreamingMarkdownState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 
 @Page("demo")
 class DemoPage : ComposeContainer() {
 
-    private val inputFlow = MutableStateFlow("")
+    private var streamVersion by mutableStateOf(0)
 
     override fun created() {
         super.created()
@@ -73,12 +72,11 @@ class DemoPage : ComposeContainer() {
 
     @Composable
     private fun MarkdownControl() {
-        val scope = rememberCoroutineScope()
         Row(modifier = Modifier.padding(12.dp)) {
             Button(
                 modifier = Modifier.weight(1F),
                 onClick = {
-                    scope.launch { fetchMarkdown() }
+                    streamVersion++
                 }
             ) {
                 Text("ClickMe")
@@ -89,40 +87,38 @@ class DemoPage : ComposeContainer() {
 
     @Composable
     private fun MarkdownComponent() {
-        val markdownState = rememberMarkdownState()
-        val inputState = inputFlow.collectAsState()
-        val input by remember { inputState }
+        val version = streamVersion
+        val markdownState: StreamingMarkdownState = rememberStreamingMarkdownState()
 
-        // 流式加载markdown原文
-        LaunchedEffect(Unit) {
-            fetchMarkdown()
+        LaunchedEffect(version) {
+            markdownState.reset()
+            markdownChunks(version).collect { chunk -> markdownState.append(chunk) }
+            markdownState.finish()
         }
 
-        // 解析markdown
-        LaunchedEffect(input) {
-            markdownState.parse(input, false)
-        }
-
-        LazyColumn {
-            item {
-                ThemedMarkdown(
-                    modifier = Modifier.padding(12.dp),
-                    state = markdownState
-                )
-            }
+        Column {
+            ThemedMarkdown(
+                modifier = Modifier.padding(12.dp),
+                streamingMarkdownState = markdownState,
+            )
         }
     }
 
-
-    private suspend fun fetchMarkdown(sse: Boolean = true) = withContext(Dispatchers.IO) {
-        val markdown = getAssets("sample.md")
-        if (!sse) {
-            inputFlow.emit(markdown)
-        } else {
-            markdown.forEachIndexed { index, c ->
-                delay(16)
-                inputFlow.emit(markdown.substring(0, index + 1))
-            }
+    /** Emits append-only chunks, mirroring upstream `Flow<String>` streaming APIs. */
+    private fun markdownChunks(version: Int): Flow<String> = flow {
+        check(version >= 0)
+        val markdown = withContext(Dispatchers.IO) { getAssets("sample.md") }
+        var index = 0
+        while (index < markdown.length) {
+            val end = minOf(index + STREAM_CHUNK_LENGTH, markdown.length)
+            emit(markdown.substring(index, end))
+            index = end
+            delay(STREAM_INTERVAL_MS)
         }
+    }
+
+    private companion object {
+        const val STREAM_CHUNK_LENGTH = 64
+        const val STREAM_INTERVAL_MS = 33L
     }
 }

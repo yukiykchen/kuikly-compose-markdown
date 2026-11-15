@@ -67,6 +67,14 @@ fun ASTNode.getUnescapedTextInNode(allFileText: CharSequence): String {
     )
 }
 
+/** The parser normalizes HTML attributes; native URL consumers must undo HTML escaping. */
+internal fun normalizeMarkdownDestination(destination: CharSequence): String =
+    EntityConverter.replaceEntities(
+        org.intellij.markdown.parser.LinkMap.normalizeDestination(destination, true),
+        processEntities = true,
+        processEscapes = false,
+    )
+
 /**
  * Extension function to map auto-link nodes to a specified target type.
  *
@@ -99,7 +107,7 @@ fun List<ASTNode>.mapAutoLinkToType(targetType: IElementType = MarkdownTokenType
 internal fun lookupLinkDefinition(
     store: MutableMap<String, String?>,
     node: ASTNode,
-    content: String,
+    content: CharSequence,
     recursive: Boolean = true,
     onlyDefinitions: Boolean = false,
 ) {
@@ -120,14 +128,19 @@ internal fun lookupLinkDefinition(
         val destination = if (linkOnly) {
             linkLabel
         } else {
-            node.findChildOfType(MarkdownElementTypes.LINK_DESTINATION)?.getUnescapedTextInNode(content)
+            node.findChildOfType(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content)?.let {
+                normalizeMarkdownDestination(it)
+            }
         }
-        store[linkLabel] = destination
+        val key = org.intellij.markdown.parser.LinkMap.normalizeLabel(linkLabel).toString()
+        if (node.type != MarkdownElementTypes.LINK_DEFINITION || key !in store) {
+            store[key] = destination
+        }
     }
 
     if (recursive) {
         node.children.forEach {
-            lookupLinkDefinition(store, it, content)
+            lookupLinkDefinition(store, it, content, recursive = true, onlyDefinitions = onlyDefinitions)
         }
     }
 }

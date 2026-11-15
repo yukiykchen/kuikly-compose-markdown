@@ -16,11 +16,19 @@ import com.tencent.kuiklybase.markdown.model.MarkdownAnnotator
 import com.tencent.kuiklybase.markdown.model.MarkdownColors
 import com.tencent.kuiklybase.markdown.model.MarkdownDimens
 import com.tencent.kuiklybase.markdown.model.MarkdownExtendedSpans
+import com.tencent.kuiklybase.markdown.model.MarkdownRenderCache
 import com.tencent.kuiklybase.markdown.model.MarkdownPadding
 import com.tencent.kuiklybase.markdown.model.MarkdownTypography
 import com.tencent.kuiklybase.markdown.model.NoOpTextProvider
 import com.tencent.kuiklybase.markdown.model.ReferenceLinkHandler
 import com.tencent.kuiklybase.markdown.model.TextProvider
+import com.tencent.kuiklybase.markdown.model.DefaultMarkdownColors
+import com.tencent.kuiklybase.markdown.model.DefaultMarkdownTypography
+import com.tencent.kuiklybase.markdown.model.DefaultMarkdownAnimation
+import com.tencent.kuiklybase.markdown.model.NoOpImageTransformerImpl
+import com.tencent.kuiklybase.markdown.model.ReferenceLinkHandlerImpl
+import com.tencent.kuiklybase.markdown.model.markdownPadding
+import com.tencent.kuiklybase.markdown.model.markdownDimens
 
 /**
  * The CompositionLocal to provide functionality related to transforming the bullet of an ordered list
@@ -40,42 +48,42 @@ val LocalOrderedListHandler = staticCompositionLocalOf {
  * Local [ReferenceLinkHandler] provider
  */
 val LocalReferenceLinkHandler = staticCompositionLocalOf<ReferenceLinkHandler> {
-    error("CompositionLocal ReferenceLinkHandler not present")
+    ReferenceLinkHandlerImpl()
 }
 
 /**
  * Local [MarkdownColors] provider
  */
 val LocalMarkdownColors = compositionLocalOf<MarkdownColors> {
-    error("No local MarkdownColors")
+    DefaultMarkdownColors()
 }
 
 /**
  * Local [MarkdownTypography] provider
  */
 val LocalMarkdownTypography = compositionLocalOf<MarkdownTypography> {
-    error("No local MarkdownTypography")
+    DefaultMarkdownTypography()
 }
 
 /**
  * Local [MarkdownPadding] provider
  */
 val LocalMarkdownPadding = staticCompositionLocalOf<MarkdownPadding> {
-    error("No local Padding")
+    markdownPadding()
 }
 
 /**
  * Local [MarkdownDimens] provider
  */
 val LocalMarkdownDimens = compositionLocalOf<MarkdownDimens> {
-    error("No local MarkdownDimens")
+    markdownDimens()
 }
 
 /**
  * Local [ImageTransformer] provider
  */
 val LocalImageTransformer = staticCompositionLocalOf<ImageTransformer> {
-    error("No local ImageTransformer")
+    NoOpImageTransformerImpl()
 }
 
 val LocalImageLinkHandler = staticCompositionLocalOf<ImageLinkHandler> { ImageLinkHandlerImpl() }
@@ -107,5 +115,8 @@ val LocalMarkdownComponents = compositionLocalOf<MarkdownComponents> {
  * Local [MarkdownAnimations] provider
  */
 val LocalMarkdownAnimations = compositionLocalOf<MarkdownAnimations> {
-    error("No local MarkdownAnimations")
+    DefaultMarkdownAnimation { this }
 }
+
+/** Cache for rendered inline text that survives LazyColumn item disposal. */
+val LocalMarkdownRenderCache = staticCompositionLocalOf<MarkdownRenderCache?> { null }

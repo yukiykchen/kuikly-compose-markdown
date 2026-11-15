@@ -1,7 +1,12 @@
 package com.tencent.kuiklybase.markdown.model
 
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
+import org.intellij.markdown.parser.LinkMap
+
 /**
- * Interface to describe the [ReferenceLinkHandler]
+ * Document-scoped link storage. Implementations must be thread-safe and their
+ * methods must not block, since publication invokes them while committing state.
  */
 interface ReferenceLinkHandler {
     /** Keep the provided link */
@@ -9,6 +14,9 @@ interface ReferenceLinkHandler {
 
     /** Returns the link for the provided label if it exists */
     fun find(label: String): String
+
+    /** Drops all stored references when a new document session starts. */
+    fun clear()
 }
 
 /**
@@ -18,12 +26,17 @@ interface ReferenceLinkHandler {
  */
 class ReferenceLinkHandlerImpl : ReferenceLinkHandler {
     private val stored = mutableMapOf<String, String?>()
+    private val lock = SynchronizedObject()
 
-    override fun store(label: String, destination: String?) {
-        stored[label.lowercase()] = destination
+    override fun store(label: String, destination: String?) = synchronized(lock) {
+        stored[LinkMap.normalizeLabel(label).toString()] = destination
     }
 
-    override fun find(label: String): String {
-        return stored[label.lowercase()] ?: ""
+    override fun find(label: String): String = synchronized(lock) {
+        stored[LinkMap.normalizeLabel(label).toString()] ?: ""
+    }
+
+    override fun clear() = synchronized(lock) {
+        stored.clear()
     }
 }

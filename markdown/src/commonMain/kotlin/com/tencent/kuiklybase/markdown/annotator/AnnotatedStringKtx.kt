@@ -11,6 +11,8 @@ import com.tencent.kuikly.compose.ui.text.LinkAnnotation
 import com.tencent.kuikly.compose.ui.text.LinkInteractionListener
 import com.tencent.kuikly.compose.ui.text.buildAnnotatedString
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import com.tencent.kuiklybase.markdown.compose.LocalMarkdownRenderCache
 import com.tencent.kuiklybase.markdown.model.MarkdownAnnotator
 import com.tencent.kuiklybase.markdown.model.ReferenceLinkHandler
 import com.tencent.kuiklybase.markdown.model.markdownAnnotator
@@ -25,10 +27,13 @@ import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.MarkdownTokenTypes
 import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.findChildOfType
+import org.intellij.markdown.ast.getTextInNode
+import com.tencent.kuiklybase.markdown.utils.normalizeMarkdownDestination
 import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMElementTypes
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
+import org.intellij.markdown.parser.CancellationToken
 import org.intellij.markdown.parser.MarkdownParser
 
 /**
@@ -87,7 +92,8 @@ fun String.buildMarkdownAnnotatedString(
     flavour: MarkdownFlavourDescriptor = GFMFlavourDescriptor(),
 ): AnnotatedString {
     val content = this
-    val parsedTree = MarkdownParser(flavour).buildMarkdownTreeFromString(content)
+    val parsedTree = MarkdownParser(flavour, cancellationToken = CancellationToken.NonCancellable)
+        .buildMarkdownTreeFromString(content as CharSequence)
     val textNode = parsedTree.children.firstOrNull { node ->
         node.type == MarkdownTokenTypes.TEXT || node.type == MarkdownElementTypes.PARAGRAPH
     }
@@ -115,10 +121,43 @@ fun String.buildMarkdownAnnotatedString(
     textNode: ASTNode,
     style: TextStyle,
     annotatorSettings: AnnotatorSettings,
-): AnnotatedString = buildAnnotatedString {
-    pushStyle(style.toSpanStyle())
-    buildMarkdownAnnotatedString(this@buildMarkdownAnnotatedString, textNode, annotatorSettings)
-    pop()
+): AnnotatedString = remember(this, textNode, style, annotatorSettings) {
+    buildAnnotatedString {
+        pushStyle(style.toSpanStyle())
+        buildMarkdownAnnotatedString(this@buildMarkdownAnnotatedString, textNode, annotatorSettings)
+        pop()
+    }
+}
+
+@Composable
+internal fun cachedMarkdownAnnotatedString(
+    content: String,
+    textNode: ASTNode,
+    style: TextStyle,
+    annotatorSettings: AnnotatorSettings,
+): AnnotatedString {
+    val source = content.substring(
+        textNode.startOffset.coerceAtLeast(0),
+        textNode.endOffset.coerceAtMost(content.length),
+    )
+    val build = {
+        buildAnnotatedString {
+            pushStyle(style.toSpanStyle())
+            buildMarkdownAnnotatedString(content, textNode, annotatorSettings)
+            pop()
+        }
+    }
+    val cache = LocalMarkdownRenderCache.current
+    val cacheRevision = cache?.revision
+    return if (cache != null) {
+        remember(source, textNode, style, annotatorSettings, cache, cacheRevision) {
+            cache.getOrPut(content, textNode, style, annotatorSettings, build)
+        }
+    } else {
+        remember(source, textNode, style, annotatorSettings) {
+            build()
+        }
+    }
 }
 
 /**
@@ -139,7 +178,9 @@ internal fun AnnotatedString.Builder.appendMarkdownLink(
         return
     }
     val text = linkText.firstOrNull()?.getUnescapedTextInNode(content)
-    val destination = node.findChildOfType(MarkdownElementTypes.LINK_DESTINATION)?.getUnescapedTextInNode(content)
+    val destination = node.findChildOfType(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content)?.let {
+        normalizeMarkdownDestination(it)
+    }
     val linkLabel = node.findChildOfType(MarkdownElementTypes.LINK_LABEL)?.getUnescapedTextInNode(content)
     val annotation = destination ?: linkLabel
 
@@ -328,7 +369,7 @@ fun AnnotatedString.Builder.buildMarkdownAnnotatedString(
 
                     // Token Types
                     MarkdownTokenTypes.TEXT -> append(child.getUnescapedTextInNode(content))
-                    GFMTokenTypes.GFM_AUTOLINK -> if (child.parent == MarkdownElementTypes.LINK_TEXT) {
+                    GFMTokenTypes.GFM_AUTOLINK -> if (parentType == MarkdownElementTypes.LINK_TEXT) {
                         append(child.getUnescapedTextInNode(content))
                     } else appendAutoLink(content, child, annotatorSettings)
 

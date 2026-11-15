@@ -21,7 +21,8 @@ class AndroidComposePageDelegate : KuiklyRenderViewBaseDelegatorDelegate, ICompo
         pageName: String,
         modules: Map<String, KuiklyRenderBaseModule>,
         onFirstFrame: (() -> Unit)?,
-        size: android.util.Size?
+        size: android.util.Size?,
+        pageData: Map<String, Any>,
     ) {
 
         exportModules.putAll(modules)
@@ -31,7 +32,7 @@ class AndroidComposePageDelegate : KuiklyRenderViewBaseDelegatorDelegate, ICompo
             container = rootView,
             contextCode = "",
             pageName = pageName,
-            pageData = emptyMap(),
+            pageData = pageData,
             size = size
         )
 

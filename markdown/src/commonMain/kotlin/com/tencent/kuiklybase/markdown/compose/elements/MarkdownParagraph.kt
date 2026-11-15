@@ -6,10 +6,9 @@ import com.tencent.kuikly.compose.ui.Modifier
 import com.tencent.kuikly.compose.foundation.layout.Column
 import com.tencent.kuikly.compose.foundation.layout.fillMaxWidth
 import com.tencent.kuikly.compose.ui.text.TextStyle
-import com.tencent.kuikly.compose.ui.text.buildAnnotatedString
 import com.tencent.kuiklybase.markdown.annotator.AnnotatorSettings
 import com.tencent.kuiklybase.markdown.annotator.annotatorSettings
-import com.tencent.kuiklybase.markdown.annotator.buildMarkdownAnnotatedString
+import com.tencent.kuiklybase.markdown.annotator.cachedMarkdownAnnotatedString
 
 import org.intellij.markdown.ast.ASTNode
 
@@ -21,11 +20,12 @@ fun MarkdownParagraph(
     style: TextStyle = LocalMarkdownTypography.current.paragraph,
     annotatorSettings: AnnotatorSettings = annotatorSettings(),
 ) {
-    val styledText = buildAnnotatedString {
-        pushStyle(style.toSpanStyle())
-        buildMarkdownAnnotatedString(content = content, node = node, annotatorSettings = annotatorSettings)
-        pop()
-    }
+    val styledText = cachedMarkdownAnnotatedString(
+        content = content,
+        textNode = node,
+        style = style,
+        annotatorSettings = annotatorSettings,
+    )
 
     // 套个娃，解决placeholder span位置不对的问题
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -33,6 +33,7 @@ fun MarkdownParagraph(
             styledText,
             modifier = modifier,
             style = style,
+            annotatorSettings = annotatorSettings,
         )
     }
 }
