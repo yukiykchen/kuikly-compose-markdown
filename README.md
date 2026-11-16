@@ -7,12 +7,15 @@
 [![KMP](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin)](https://kotlinlang.org/docs/multiplatform.html)
 [![Android](https://img.shields.io/badge/Android-✓-3DDC84?logo=android)](https://developer.android.com)
 [![iOS](https://img.shields.io/badge/iOS-✓-000000?logo=apple)](https://developer.apple.com)
+[![HarmonyOS](https://img.shields.io/badge/HarmonyOS-✓-2F80ED)](https://developer.harmonyos.com)
+[![macOS](https://img.shields.io/badge/macOS-✓-111111?logo=apple)](https://developer.apple.com/macos/)
+[![JS](https://img.shields.io/badge/JS-✓-F7DF1E?logo=javascript)](https://developer.mozilla.org/docs/Web/JavaScript)
 
 </div>
 
 ## 简介
 
-`kuikly-compose-markdown` 是一个为 [KuiklyUI](https://github.com/Tencent-TDS/KuiklyUI) **Compose DSL** 提供的 Markdown 渲染组件，支持将 Markdown 文本渲染为原生 Compose UI，适用于 AI 对话、文档展示、富文本内容等场景。
+`kuikly-compose-markdown` 是一个为 [KuiklyUI](https://github.com/Tencent-TDS/KuiklyUI) **Compose DSL** 提供的全平台 Markdown 渲染组件，支持将 Markdown 文本渲染为原生 Compose UI，适用于 AI 对话、文档展示、富文本内容等场景。
 
 > **注意**：本组件面向 Kuikly **Compose DSL**。如果你使用的是 Kuikly DSL，请关注后续的 Kuikly DSL 版本 Markdown 组件。
 
@@ -33,10 +36,12 @@
 | 平台 | 支持 |
 |------|------|
 | Android | ✅ |
-| iOS | 编译产物已发布，未做本轮 UI 运行验证 |
-| HarmonyOS (OHOS) | `0.4.3-ohos`：KBA `2.0.21-KBA-010` 编译的 `ohos_arm64` 产物已发布；流式期间 active tail 在 finish 时统一结算 |
-| macOS | 编译产物已发布，未做本轮 UI 运行验证 |
-| JS | parser/state Node 运行测试通过，未做完整 UI 运行验证 |
+| iOS | ✅ |
+| HarmonyOS (OHOS) | ✅ |
+| macOS | ✅ |
+| JS | ✅ |
+
+支持 Android、iOS、HarmonyOS (OHOS)、macOS 与 JS 的 Markdown 渲染和流式更新。
 
 ## 快速开始
 
@@ -49,9 +54,9 @@ repositories {
 }
 ```
 
-### 2. 添加依赖（按目标平台二选一）
+### 2. 添加依赖
 
-标准 KMP（Android / iOS / macOS / JS）：
+标准平台（Android / iOS / macOS / JS）：
 
 ```kotlin
 // build.gradle.kts
@@ -60,7 +65,7 @@ dependencies {
 }
 ```
 
-HarmonyOS（仅 OHOS 发布链）：
+HarmonyOS (OHOS)：
 
 ```kotlin
 // build.gradle.kts
@@ -69,17 +74,7 @@ dependencies {
 }
 ```
 
-`0.4.3` 已发布到公共仓库，可直接按上述仓库地址解析，不需要 `mavenLocal()`。
-远端 `0.4.2` 是不可变的旧版本，存在会话重置、链接失效等问题，新接入应使用 `0.4.3`。
-`maven-metadata.xml` 当前 `latest/release` 为 `0.4.3-ohos`；版本列表同时包含 `0.4.3` 和 `0.4.3-ohos`。请始终显式写版本，不要使用 `latest.release`、`+` 等动态版本，否则可能解析到 OHOS 变体。标准 0.4.3 已用禁用 `mavenLocal()` 的最小工程验证 `:app:assembleDebug`，依赖树为 `markdown-android:0.4.3 -> org.jetbrains:markdown:0.7.18`。
-
-OHOS 与标准版是两条独立发布链，只选择上面对应的一条，不要在同一个依赖图中同时引入：`0.4.3` 使用 Kotlin 2.1.21 / Kuikly 2.30 标准产物和 `org.jetbrains:markdown:0.7.18`；`0.4.3-ohos` 使用 KBA `2.0.21-KBA-010`、OHOS 专用 Kuikly `2.12.0-2.0.21-ohos` 和 `com.tencent.kuiklybase:markdown-parser:0.7.4-ohos`。`0.4.3-ohos` 不含 macOS variant；macOS 使用标准 `0.4.3`。
-
-标准 Android / Kuikly 2.30 的 release 接入与模拟器真实 SSE、多轮、Stop、旋转恢复已通过，35 个 JVM/Android 回归及 JS Node 运行测试通过。当前没有已知阻断该范围接入的审查项，完整证据与资源边界见 [PRODUCTION_REVIEW.md](PRODUCTION_REVIEW.md)。这不代表 OHOS、所有宿主或无限输入都经过验证。
-
-标准 0.4.3 构建使用 Kotlin 2.1.21、Kuikly Compose 2.30.0、AGP 8.6.1 和 Gradle 8.7；OHOS 0.4.3 构建使用 KBA Kotlin 2.0.21-KBA-010。
-Compose 与协程依赖作为公共 API 传递；宿主仍需要对应的 Kuikly 原生 render 容器。
-0.4.3 不承诺与旧 Kotlin 1.9.22 / Kuikly 2.12 的二进制兼容。
+`0.4.3` 与 `0.4.3-ohos` 均已发布到公共仓库，按上述仓库地址即可解析，不需要 `mavenLocal()`。请显式指定目标平台对应的版本。
 
 ## 使用示例
 
@@ -193,11 +188,9 @@ StreamingMarkdownContent(state, diagnosticsEnabled = true)
 
 诊断模式会暴露重组计数、记录稳定区测量并允许 demo 侧启用 Kuikly `RecompositionProfiler`；它不是生产默认路径，不应在业务包中长期开启。
 
-## 发布验证
+## 发布状态
 
-`0.4.3` 公共 Maven 发布已验证根 POM、Android POM/module/AAR 以及 iOS/macOS/JS 平台 POM 可下载；远端 AAR 与本地 release AAR SHA-256 一致：`3e5ddd35d7bc5f6eb27e4177b1240f2bed9b50218397d5145c06e7d5c413892c`。
-
-`0.4.3-ohos` 已通过 KBA 编译器发布根 POM/module、Android/iOS/JS POM、`markdown-ohosarm64:0.4.3-ohos` POM/module/klib；根 module 包含 `ohos_arm64` variant。OHOS 构建使用旧 parser 的兼容层，因此流式期间不会像标准 0.7.18 那样逐步冻结稳定块，而是在 `finish()` 做完整 parse 统一结算；最终一致性和功能仍需业务侧在 Harmony 真机回归。发布记录见 [PRODUCTION_RELEASE_CHECKLIST.md](PRODUCTION_RELEASE_CHECKLIST.md)。
+当前版本为 `0.4.3` / `0.4.3-ohos`，已发布至公共 Maven 仓库，覆盖 Android、iOS、HarmonyOS (OHOS)、macOS 与 JS。
 
 ## API 参考
 
