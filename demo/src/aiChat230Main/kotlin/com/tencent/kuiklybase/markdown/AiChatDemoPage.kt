@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.withFrameNanos
 import com.tencent.kuikly.compose.ComposeContainer
@@ -103,6 +104,7 @@ class AiChatDemoPage : ComposeContainer() {
     private var recompositionProfilerStarted = false
     private var diagnosticsEnabled = false
     private var activeRequest: NetworkModule.StreamRequestHandle? = null
+    private var autoFollowOutput = true
 
     override fun created() {
         super.created()
@@ -140,8 +142,38 @@ class AiChatDemoPage : ComposeContainer() {
         )
         val components = remember { markdownComponents() }
         val hasAnswer by markdownState.hasRenderableBlocks.collectAsState()
+        val contentLength by snapshotFlow { markdownState.contentLength }
+            .collectAsState(initial = 0)
         DisposableEffect(Unit) {
             onDispose { activeRequest?.close() }
+        }
+        // Keep new text visible while streaming, but stop following when the user scrolls up.
+        LaunchedEffect(listState) {
+            snapshotFlow {
+                val info = listState.layoutInfo
+                val last = info.visibleItemsInfo.lastOrNull()
+                val lastIndex = info.totalItemsCount - 1
+                val bottomDistance = if (last != null && last.index == lastIndex) {
+                    info.viewportEndOffset - (last.offset + last.size)
+                } else Int.MAX_VALUE
+                Triple(bottomDistance, listState.lastScrolledBackward, listState.isScrollInProgress)
+            }.collect { (bottomDistance, scrolledBackward, scrolling) ->
+                if (scrolledBackward && scrolling) autoFollowOutput = false
+                if (bottomDistance in 0..96) autoFollowOutput = true
+            }
+        }
+        LaunchedEffect(contentLength, hasAnswer, autoFollowOutput, isStreaming) {
+            if (!autoFollowOutput || !hasAnswer || !isStreaming) return@LaunchedEffect
+            withFrameNanos { }
+            listState.scroll {
+                var remaining = listState.layoutInfo.viewportSize.height.toFloat()
+                var attempts = 0
+                while (remaining > 0f && attempts++ < 8) {
+                    val delta = scrollBy(remaining)
+                    if (delta <= 0f) break
+                    remaining -= delta
+                }
+            }
         }
         if (diagnosticsEnabled) {
             SideEffect { markdownState.recompositionCounters.recordScreen() }
@@ -222,6 +254,7 @@ class AiChatDemoPage : ComposeContainer() {
                     }
                     messages = messages + ChatMessage(assistant = false, text = prompt)
                     markdownState.reset()
+                    autoFollowOutput = true
                     saveRestoredMarkdown("")
                     synchronized(pendingLock) { requestVersion++ }
                 },
