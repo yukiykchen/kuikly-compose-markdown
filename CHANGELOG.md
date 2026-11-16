@@ -5,7 +5,14 @@
 3. 默认公共 API 可直接渲染；components/回调合法更新生效；长代码完整行分块。
 4. 流式合帧不丢字，上游异常可观察，文档与待解析尾部有显式资源预算。
 5. 标准构建对齐 Kotlin 2.1.21 / Kuikly 2.30；增加 JVM、JS、模拟器、发布元数据验证。
-6. 已发布到公共 Maven，远端 AAR 与本地 release 产物哈希一致；0.4.2 不覆盖。标准版本不提供未经验证的 OHOS 坐标。
+6. 已发布到公共 Maven，远端 AAR 与本地 release 产物哈希一致；0.4.2 不覆盖。标准版本不含 OHOS target；OHOS 使用单独的 `0.4.3-ohos` 坐标。
+
+### [0.4.3-ohos] 2026-11-16
+
+1. 使用 KBA Kotlin 2.0.21-KBA-010 编译并发布 `ohos_arm64` klib。
+2. 使用 OHOS 专用 Kuikly 2.12.0-2.0.21-ohos 与 `markdown-parser:0.7.4-ohos` 依赖链。
+3. 为旧 KBA parser 增加流式 API 兼容层；active tail 在 finish 时统一完整解析，运行级 Harmony UI 回归仍待补。
+4. 不含 macOS target；macOS 使用标准 0.4.3。
 
 ### [1.0.2]
 1. 修复表格单元格内自定义Annotator不生效问题；

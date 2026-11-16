@@ -1,6 +1,10 @@
 //import com.tencent.kuikly.gradle.publish.AndroidArtifactTask
 //import com.tencent.kuiklybase.registerPublicationsFromKotlinPlugin
 
+import com.tencent.kuiklybase.MavenConfig
+import com.tencent.kuiklybase.configureMavenCentralMetadata
+import com.tencent.kuiklybase.signPublicationIfKeyPresent
+
 plugins {
     kotlin("multiplatform")
     kotlin("plugin.compose")
@@ -11,11 +15,29 @@ plugins {
 }
 
 group = "com.tencent.kuiklybase"
-version = "1.0.3-SNAPSHOT"
+version = "0.4.3-ohos"
 
 publishing {
     repositories {
-        mavenLocal()
+        val username = (project.findProperty("mavenUserName") as? String)
+            ?: System.getenv("mavenUserName")
+            ?: MavenConfig.getUsername(project)
+        val password = (project.findProperty("mavenPassword") as? String)
+            ?: System.getenv("mavenPassword")
+            ?: MavenConfig.getPassword(project)
+        val repoUrl = (project.findProperty("repoUrl") as? String)
+            ?: System.getenv("KUIKLY_MAVEN_REPO_URL")
+            ?: ""
+        if (username.isNotEmpty() && password.isNotEmpty() && repoUrl.isNotEmpty()) {
+            maven {
+                credentials { setUsername(username); setPassword(password) }
+                url = uri(repoUrl)
+            }
+        }
+    }
+    publications.withType<MavenPublication>().configureEach {
+        pom.configureMavenCentralMetadata()
+        signPublicationIfKeyPresent(project)
     }
 }
 

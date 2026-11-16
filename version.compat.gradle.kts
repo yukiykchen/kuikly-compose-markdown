@@ -44,7 +44,7 @@ val versions = hashMapOf(
     /* Kotlin 2.0.21 */
     BUILD_TYPE_OHOS to mutableMapOf(
         AGP to "8.1.0",
-        KOTLIN to "2.0.21-KBA-004",
+        KOTLIN to "2.0.21-KBA-010",
         COMPOSE to "1.7.3",
         KSP to "2.0.21-1.0.27",
         KUIKLY_COMPOSE to "2.12.0-2.0.21-ohos",

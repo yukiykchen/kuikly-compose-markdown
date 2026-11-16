@@ -59,4 +59,15 @@ ALLOW_REMOTE_PUBLISH=1 scripts/publish-remote.sh internal
 - 远端-only consumer 工程禁用 `mavenLocal()`，使用 `--refresh-dependencies` 后 `:app:assembleDebug` 成功，日志 `/tmp/markdown-043-remote-consumer-20261115.log`；依赖树显示 `com.tencent.kuiklybase:markdown-android:0.4.3 -> org.jetbrains:markdown:0.7.18`。
 - 上传前门禁通过：`PRODUCTION_GATES_OK version=0.4.3 poms=8 modules=8 tests=35 lint_errors=0`。
 
-结论：**0.4.3 标准 KMP 坐标已完成公共发布与远端接入验证**。Android / Kuikly 2.30 运行级验证见 `PRODUCTION_REVIEW.md`；iOS/macOS 为编译产物验证，OHOS 不包含在本次发布范围。
+结论：**0.4.3 标准 KMP 坐标已完成公共发布与远端接入验证**。Android / Kuikly 2.30 运行级验证见 `PRODUCTION_REVIEW.md`；iOS/macOS 为编译产物验证。OHOS 另有 `0.4.3-ohos` KBA 发布，见下一节。
+
+## 0.4.3-ohos KBA 发布记录（2026-11-16）
+
+- 使用 KBA Kotlin `2.0.21-KBA-010`、OHOS 专用 Kuikly `2.12.0-2.0.21-ohos`、`markdown-parser:0.7.4-ohos` 和 OHOS 特化 coroutines/atomicfu，实际编译 common metadata、`ohos_arm64`、iOS、JS、Android；编译日志 `/tmp/markdown-043-ohos-component-gates.log`。
+- `0.4.3-ohos` 已发布到公共仓库，上传日志 `/tmp/markdown-043-ohos-publish-final.log`；根 POM/module、Android POM、`markdown-ohosarm64` POM/module/klib 均 HTTP 200。
+- 根 Gradle module metadata 包含 `ohos_arm64` variant，并指向 `markdown-ohosarm64/0.4.3-ohos/markdown-ohosarm64-0.4.3-ohos.module`；native targets 为 `ios_arm64`、`ios_simulator_arm64`、`ios_x64`、`ohos_arm64`。
+- `0.4.3-ohos` 不含 macOS variant；macOS 继续使用标准 `0.4.3`。两个坐标不要混淆或放在同一依赖图。
+- 由于 KBA parser 是 0.7.4 fork，没有 `0.7.18` 的稳定边界 API，OHOS 版通过兼容层把 active tail 保持到 `finish()` 再做完整 parse。最终解析一致性由同一 final parse 保证，但流式期间稳定块冻结与标准版不完全等价；尚无 HarmonyOS 真机 UI 运行验证。
+- `maven-metadata.xml` 的 `latest/release` 当前为 `0.4.3-ohos`，版本列表包含 `0.4.3` 和 `0.4.3-ohos`。
+
+结论：**KBA 编译的 OHOS klib 已作为 `0.4.3-ohos` 发布**；后续仍需 OHOS consumer 编译和 Harmony 真机 UI 回归，才能把 OHOS 标为运行级生产验证。
