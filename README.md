@@ -49,24 +49,31 @@ repositories {
 }
 ```
 
-### 2. 添加依赖
+### 2. 添加依赖（按目标平台二选一）
+
+标准 KMP（Android / iOS / macOS / JS）：
 
 ```kotlin
 // build.gradle.kts
 dependencies {
-    // Android / iOS / macOS / JS
     implementation("com.tencent.kuiklybase:markdown:0.4.3")
+}
+```
 
-    // HarmonyOS：KBA/OHOS 独立发布链
+HarmonyOS（仅 OHOS 发布链）：
+
+```kotlin
+// build.gradle.kts
+dependencies {
     implementation("com.tencent.kuiklybase:markdown:0.4.3-ohos")
 }
 ```
 
 `0.4.3` 已发布到公共仓库，可直接按上述仓库地址解析，不需要 `mavenLocal()`。
 远端 `0.4.2` 是不可变的旧版本，存在会话重置、链接失效等问题，新接入应使用 `0.4.3`。
-`maven-metadata.xml` 当前 `latest/release` 为 `0.4.3-ohos`；版本列表同时包含 `0.4.3` 和 `0.4.3-ohos`。标准 0.4.3 已用禁用 `mavenLocal()` 的最小工程验证 `:app:assembleDebug`，依赖树为 `markdown-android:0.4.3 -> org.jetbrains:markdown:0.7.18`。
+`maven-metadata.xml` 当前 `latest/release` 为 `0.4.3-ohos`；版本列表同时包含 `0.4.3` 和 `0.4.3-ohos`。请始终显式写版本，不要使用 `latest.release`、`+` 等动态版本，否则可能解析到 OHOS 变体。标准 0.4.3 已用禁用 `mavenLocal()` 的最小工程验证 `:app:assembleDebug`，依赖树为 `markdown-android:0.4.3 -> org.jetbrains:markdown:0.7.18`。
 
-OHOS 与标准版是两条独立发布链，不要在同一个依赖图中混用：`0.4.3` 使用 Kotlin 2.1.21 / Kuikly 2.30 标准产物和 `org.jetbrains:markdown:0.7.18`；`0.4.3-ohos` 使用 KBA `2.0.21-KBA-010`、OHOS 专用 Kuikly `2.12.0-2.0.21-ohos` 和 `com.tencent.kuiklybase:markdown-parser:0.7.4-ohos`。`0.4.3-ohos` 不含 macOS variant；macOS 使用标准 `0.4.3`。
+OHOS 与标准版是两条独立发布链，只选择上面对应的一条，不要在同一个依赖图中同时引入：`0.4.3` 使用 Kotlin 2.1.21 / Kuikly 2.30 标准产物和 `org.jetbrains:markdown:0.7.18`；`0.4.3-ohos` 使用 KBA `2.0.21-KBA-010`、OHOS 专用 Kuikly `2.12.0-2.0.21-ohos` 和 `com.tencent.kuiklybase:markdown-parser:0.7.4-ohos`。`0.4.3-ohos` 不含 macOS variant；macOS 使用标准 `0.4.3`。
 
 标准 Android / Kuikly 2.30 的 release 接入与模拟器真实 SSE、多轮、Stop、旋转恢复已通过，35 个 JVM/Android 回归及 JS Node 运行测试通过。当前没有已知阻断该范围接入的审查项，完整证据与资源边界见 [PRODUCTION_REVIEW.md](PRODUCTION_REVIEW.md)。这不代表 OHOS、所有宿主或无限输入都经过验证。
 
