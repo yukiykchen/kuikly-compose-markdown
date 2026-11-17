@@ -30,6 +30,12 @@ cp "$LOCAL_PROPS" "$WORK/local.properties"
 
 mkdir -p "$WORK/ComposeMarkdown/src/commonMain"
 cp -R "$ROOT/markdown/src/commonMain/" "$WORK/ComposeMarkdown/src/commonMain/"
+mkdir -p "$WORK/ComposeMarkdown/src/nativeStreamingMain"
+cp -R "$ROOT/markdown/src/nativeStreamingMain/" "$WORK/ComposeMarkdown/src/nativeStreamingMain/"
+mkdir -p "$WORK/ComposeMarkdown/src/nativeMain" "$WORK/ComposeMarkdown/src/androidMain" "$WORK/ComposeMarkdown/src/jsMain"
+cp -R "$ROOT/markdown/src/nativeMain/" "$WORK/ComposeMarkdown/src/nativeMain/"
+cp -R "$ROOT/markdown/src/androidMain/" "$WORK/ComposeMarkdown/src/androidMain/"
+cp -R "$ROOT/markdown/src/jsMain/" "$WORK/ComposeMarkdown/src/jsMain/"
 
 mkdir -p "$WORK/shared/src/commonMain/kotlin/com/tencent/kuiklybase/markdown"
 cp "$ROOT/demo/src/aiChat230Main/kotlin/com/tencent/kuiklybase/markdown/SseEventParser.kt" \
@@ -104,6 +110,22 @@ kotlin {
                 }
             }
         }
+        val nativeStreamingMain by creating {
+            dependsOn(commonMain)
+        }
+        val nativeMain by creating {
+            dependsOn(commonMain)
+        }
+        val androidMain by getting {
+            dependsOn(nativeStreamingMain)
+        }
+        val jsMain by getting {
+            dependsOn(nativeStreamingMain)
+        }
+        listOf("iosArm64Main", "iosX64Main", "iosSimulatorArm64Main", "macosX64Main", "macosArm64Main").forEach {
+            findByName(it)?.dependsOn(nativeStreamingMain)
+            findByName(it)?.dependsOn(nativeMain)
+        }
     }
 }
 
@@ -119,10 +141,15 @@ if library_version:
     if not all(char.isalnum() or char in '.-' for char in library_version):
         raise SystemExit("Invalid AI_CHAT_LIBRARY_VERSION")
     shutil.rmtree(root / "ComposeMarkdown/src/commonMain")
+    shutil.rmtree(root / "ComposeMarkdown/src/nativeStreamingMain")
+    shutil.rmtree(root / "ComposeMarkdown/src/nativeMain")
+    shutil.rmtree(root / "ComposeMarkdown/src/androidMain")
+    shutil.rmtree(root / "ComposeMarkdown/src/jsMain")
     module = root / "ComposeMarkdown/build.gradle.kts"
     text = module.read_text()
+    # Android-only shell must target the published Android variant, not the KMP root module.
     text = text.replace('api("org.jetbrains:markdown:0.7.18")',
-                        f'api("com.tencent.kuiklybase:markdown:{library_version}")')
+                        f'api("com.tencent.kuiklybase:markdown-android:{library_version}")')
     module.write_text(text)
 
 build = root / "build.gradle.kts"

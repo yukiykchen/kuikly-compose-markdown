@@ -4,6 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import com.tencent.kuikly.compose.ui.unit.Dp
 import com.tencent.kuikly.compose.ui.unit.dp
+import com.tencent.kuiklybase.markdown.model.MarkdownAlertDimens
+import com.tencent.kuiklybase.markdown.model.markdownAlertDimens
 
 interface MarkdownDimens {
     val dividerThickness: Dp
@@ -14,6 +16,9 @@ interface MarkdownDimens {
     val tableSeparatorThickness: Dp
     val tableCellPadding: Dp
     val tableCornerSize: Dp
+
+    /** Dimensions of GitHub alerts. */
+    val alert: MarkdownAlertDimens get() = markdownAlertDimens()
 }
 
 @Immutable
@@ -26,6 +31,7 @@ private class DefaultMarkdownDimens(
     override val tableCellWidth: Dp,
     override val tableCellPadding: Dp,
     override val tableCornerSize: Dp,
+    override val alert: MarkdownAlertDimens,
 ) : MarkdownDimens
 
 fun markdownDimens(
@@ -37,6 +43,7 @@ fun markdownDimens(
     tableSeparatorThickness: Dp = 1.dp,
     tableCellPadding: Dp = 12.dp,
     tableCornerSize: Dp = 8.dp,
+    alert: MarkdownAlertDimens = markdownAlertDimens(),
 ): MarkdownDimens = DefaultMarkdownDimens(
     dividerThickness = dividerThickness,
     codeBackgroundCornerSize = codeBackgroundCornerSize,
@@ -46,6 +53,7 @@ fun markdownDimens(
     tableCellWidth = tableCellWidth,
     tableCellPadding = tableCellPadding,
     tableCornerSize = tableCornerSize,
+    alert = alert,
 )
 
 fun MarkdownDimens.merge(
@@ -57,6 +65,7 @@ fun MarkdownDimens.merge(
     tableCellWidth: Dp? = null,
     tableCellPadding: Dp? = null,
     tableCornerSize: Dp? = null,
+    alert: MarkdownAlertDimens? = null,
 ): MarkdownDimens {
     return DefaultMarkdownDimens(
         dividerThickness = dividerThickness ?: this.dividerThickness,
@@ -67,5 +76,6 @@ fun MarkdownDimens.merge(
         tableSeparatorThickness = tableSeparatorThickness ?: this.tableSeparatorThickness,
         tableCellPadding = tableCellPadding ?: this.tableCellPadding,
         tableCornerSize = tableCornerSize ?: this.tableCornerSize,
+        alert = alert ?: this.alert,
     )
 }

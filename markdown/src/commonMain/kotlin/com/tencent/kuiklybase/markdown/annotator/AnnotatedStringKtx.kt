@@ -13,7 +13,9 @@ import com.tencent.kuikly.compose.ui.text.buildAnnotatedString
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import com.tencent.kuiklybase.markdown.compose.LocalMarkdownRenderCache
+import com.tencent.kuiklybase.markdown.compose.LocalMarkdownBlockLinkGeneration
 import com.tencent.kuiklybase.markdown.model.MarkdownAnnotator
+import com.tencent.kuiklybase.markdown.model.MarkdownEmojiShortcodes
 import com.tencent.kuiklybase.markdown.model.ReferenceLinkHandler
 import com.tencent.kuiklybase.markdown.model.markdownAnnotator
 import com.tencent.kuiklybase.markdown.utils.MARKDOWN_TAG_IMAGE_URL
@@ -21,6 +23,7 @@ import com.tencent.kuiklybase.markdown.utils.findChildOfTypeRecursive
 import com.tencent.kuiklybase.markdown.utils.getUnescapedTextInNode
 import com.tencent.kuiklybase.markdown.utils.innerList
 import com.tencent.kuiklybase.markdown.utils.mapAutoLinkToType
+import com.tencent.kuiklybase.markdown.utils.resolveImageLink
 import com.tencent.kuikly.compose.ui.text.TextLinkStyles
 import com.tencent.kuikly.compose.ui.text.withLink
 import org.intellij.markdown.MarkdownElementTypes
@@ -35,6 +38,7 @@ import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.CancellationToken
 import org.intellij.markdown.parser.MarkdownParser
+import com.tencent.kuiklybase.markdown.compat.parseMarkdown
 
 /**
  * Extension function to build an `AnnotatedString` from a Markdown string.
@@ -92,8 +96,7 @@ fun String.buildMarkdownAnnotatedString(
     flavour: MarkdownFlavourDescriptor = GFMFlavourDescriptor(),
 ): AnnotatedString {
     val content = this
-    val parsedTree = MarkdownParser(flavour, cancellationToken = CancellationToken.NonCancellable)
-        .buildMarkdownTreeFromString(content as CharSequence)
+    val parsedTree = parseMarkdown(flavour, CancellationToken.NonCancellable, content)
     val textNode = parsedTree.children.firstOrNull { node ->
         node.type == MarkdownTokenTypes.TEXT || node.type == MarkdownElementTypes.PARAGRAPH
     }
@@ -149,12 +152,13 @@ internal fun cachedMarkdownAnnotatedString(
     }
     val cache = LocalMarkdownRenderCache.current
     val cacheRevision = cache?.revision
+    val linkGeneration = LocalMarkdownBlockLinkGeneration.current
     return if (cache != null) {
-        remember(source, textNode, style, annotatorSettings, cache, cacheRevision) {
-            cache.getOrPut(content, textNode, style, annotatorSettings, build)
+        remember(source, textNode, style, annotatorSettings, cache, cacheRevision, linkGeneration) {
+            cache.getOrPut(content, textNode, style, annotatorSettings, build, generation = linkGeneration)
         }
     } else {
-        remember(source, textNode, style, annotatorSettings) {
+        remember(source, textNode, style, annotatorSettings, linkGeneration) {
             build()
         }
     }
@@ -178,9 +182,8 @@ internal fun AnnotatedString.Builder.appendMarkdownLink(
         return
     }
     val text = linkText.firstOrNull()?.getUnescapedTextInNode(content)
-    val destination = node.findChildOfType(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content)?.let {
-        normalizeMarkdownDestination(it)
-    }
+    val destination = node.findChildOfType(MarkdownElementTypes.LINK_DESTINATION)
+        ?.let { normalizeMarkdownDestination(it.getUnescapedTextInNode(content)) }
     val linkLabel = node.findChildOfType(MarkdownElementTypes.LINK_LABEL)?.getUnescapedTextInNode(content)
     val annotation = destination ?: linkLabel
 
@@ -193,10 +196,14 @@ internal fun AnnotatedString.Builder.appendMarkdownLink(
                 annotatorSettings.linkInteractionListener
             )
         ) {
-            buildMarkdownAnnotatedString(content, linkText.mapAutoLinkToType(), annotatorSettings)
+            buildMarkdownAnnotatedString(
+                content,
+                linkText.mapAutoLinkToType(),
+                annotatorSettings.withoutEmojiShortcodes(),
+            )
         }
     } else {
-        buildMarkdownAnnotatedString(content, linkText, annotatorSettings)
+        buildMarkdownAnnotatedString(content, linkText, annotatorSettings.withoutEmojiShortcodes())
     }
 }
 
@@ -236,11 +243,36 @@ internal fun AnnotatedString.Builder.appendMarkdownReference(
                 annotatorSettings.linkInteractionListener
             )
         ) {
-            buildMarkdownAnnotatedString(content, linkText.mapAutoLinkToType(), annotatorSettings)
+            buildMarkdownAnnotatedString(
+                content,
+                linkText.mapAutoLinkToType(),
+                annotatorSettings.withoutEmojiShortcodes(),
+            )
         }
     } else {
-        // if no reference is found, reference links are just rendered as normal text.
+        // The current Kuikly parser shape keeps brackets in labelNode; upstream's
+        // linkText + labelNode split would duplicate short references like [ref].
         append(node.getUnescapedTextInNode(content))
+    }
+}
+
+/** Appends an email autolink without its surrounding angle brackets. */
+internal fun AnnotatedString.Builder.appendEmailAutoLink(
+    content: String,
+    node: ASTNode,
+    annotatorSettings: AnnotatorSettings,
+) {
+    val email = node.getUnescapedTextInNode(content)
+    val destination = "mailto:$email"
+    annotatorSettings.referenceLinkHandler?.store(email, destination)
+    withLink(
+        LinkAnnotation.Url(
+            destination,
+            annotatorSettings.linkTextSpanStyle,
+            linkInteractionListener = annotatorSettings.linkInteractionListener
+        )
+    ) {
+        append(email)
     }
 }
 
@@ -308,9 +340,21 @@ fun AnnotatedString.Builder.buildMarkdownAnnotatedString(
 ) {
     val annotate = annotatorSettings.annotator.annotate
     val eolAsNewLine = annotatorSettings.annotator.config.eolAsNewLine
+    val emojiShortcodes = annotatorSettings.emojiShortcodes
+    var pendingColon: ASTNode? = null
+    var pendingAlias: ASTNode? = null
     var skipIfNext: Any? = null
-    children.forEach { child ->
+    children.forEachIndexed { index, child ->
         if (skipIfNext == null || skipIfNext != child.type) {
+            if (pendingColon != null && pendingAlias == null && !isEmojiAliasNode(child)) {
+                append(':')
+                pendingColon = null
+            } else if (pendingAlias != null && !isEmojiClosingColon(child)) {
+                append(':')
+                appendInlineText(content, pendingAlias!!, emojiShortcodes, localOnly = true)
+                pendingColon = null
+                pendingAlias = null
+            }
             if (annotate == null || !annotate(content, child, annotatorSettings)) {
                 val parentType = child.parent?.type
 
@@ -322,10 +366,12 @@ fun AnnotatedString.Builder.buildMarkdownAnnotatedString(
                         annotatorSettings = annotatorSettings
                     )
 
-                    MarkdownElementTypes.IMAGE -> child.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)
-                        ?.let {
-                            appendInlineContent(MARKDOWN_TAG_IMAGE_URL, it.getUnescapedTextInNode(content))
-                        }
+                    MarkdownElementTypes.IMAGE -> child.resolveImageLink(
+                        content,
+                        annotatorSettings.referenceLinkHandler,
+                    )?.let {
+                        appendInlineContent(MARKDOWN_TAG_IMAGE_URL, it)
+                    }
 
                     MarkdownElementTypes.EMPH -> {
                         pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
@@ -346,9 +392,10 @@ fun AnnotatedString.Builder.buildMarkdownAnnotatedString(
                     }
 
                     MarkdownElementTypes.CODE_SPAN -> {
+                        val codeSettings = annotatorSettings.withoutEmojiShortcodes()
                         pushStyle(annotatorSettings.codeSpanStyle)
                         append(' ')
-                        buildMarkdownAnnotatedString(content, child.children.innerList(), annotatorSettings)
+                        buildMarkdownAnnotatedString(content, child.children.innerList(), codeSettings)
                         append(' ')
                         pop()
                     }
@@ -368,9 +415,21 @@ fun AnnotatedString.Builder.buildMarkdownAnnotatedString(
                     )
 
                     // Token Types
-                    MarkdownTokenTypes.TEXT -> append(child.getUnescapedTextInNode(content))
+                    MarkdownTokenTypes.TEXT -> if (pendingColon != null && pendingAlias == null) {
+                        pendingAlias = child
+                    } else {
+                        appendInlineText(
+                            content = content,
+                            node = child,
+                            emojiShortcodes = emojiShortcodes,
+                        )
+                    }
                     GFMTokenTypes.GFM_AUTOLINK -> if (parentType == MarkdownElementTypes.LINK_TEXT) {
-                        append(child.getUnescapedTextInNode(content))
+                        appendInlineText(
+                            content = content,
+                            node = child,
+                            emojiShortcodes = emojiShortcodes,
+                        )
                     } else appendAutoLink(content, child, annotatorSettings)
 
                     MarkdownTokenTypes.SINGLE_QUOTE -> append('\'')
@@ -379,9 +438,25 @@ fun AnnotatedString.Builder.buildMarkdownAnnotatedString(
                     MarkdownTokenTypes.RPAREN -> append(')')
                     MarkdownTokenTypes.LBRACKET -> append('[')
                     MarkdownTokenTypes.RBRACKET -> append(']')
-                    MarkdownTokenTypes.LT -> append('<')
-                    MarkdownTokenTypes.GT -> append('>')
-                    MarkdownTokenTypes.COLON -> append(':')
+                    MarkdownTokenTypes.LT -> if (children.getOrNull(index + 1)?.type?.name != "EMAIL_AUTOLINK") {
+                        append('<')
+                    }
+
+                    MarkdownTokenTypes.GT -> if (children.getOrNull(index - 1)?.type?.name != "EMAIL_AUTOLINK") {
+                        append('>')
+                    }
+                    MarkdownTokenTypes.COLON -> handleColonToken(
+                        content = content,
+                        children = children,
+                        index = index,
+                        node = child,
+                        parentType = parentType,
+                        emojiShortcodes = emojiShortcodes,
+                        pendingColon = { pendingColon },
+                        pendingAlias = { pendingAlias },
+                        setPendingAlias = { pendingAlias = it },
+                        setPendingColon = { pendingColon = it },
+                    )
                     MarkdownTokenTypes.EXCLAMATION_MARK -> append('!')
                     MarkdownTokenTypes.BACKTICK -> append('`')
                     MarkdownTokenTypes.HARD_LINE_BREAK -> {
@@ -389,14 +464,39 @@ fun AnnotatedString.Builder.buildMarkdownAnnotatedString(
                         skipIfNext = MarkdownTokenTypes.EOL
                     }
 
-                    MarkdownTokenTypes.EMPH -> if (parentType != MarkdownElementTypes.EMPH && parentType != MarkdownElementTypes.STRONG) append(
-                        '*'
-                    )
+                    MarkdownTokenTypes.EMPH -> if (parentType != MarkdownElementTypes.EMPH && parentType != MarkdownElementTypes.STRONG) {
+                        append(child.getTextInNode(content))
+                    }
 
                     MarkdownTokenTypes.EOL -> if (eolAsNewLine) append('\n') else append(' ')
                     MarkdownTokenTypes.WHITE_SPACE -> if (length > 0) append(' ')
                     MarkdownTokenTypes.BLOCK_QUOTE -> {
                         skipIfNext = MarkdownTokenTypes.WHITE_SPACE
+                    }
+
+                    else -> when (child.type.name) {
+                        ":" -> handleColonToken(
+                            content = content,
+                            children = children,
+                            index = index,
+                            node = child,
+                            parentType = parentType,
+                            emojiShortcodes = emojiShortcodes,
+                            pendingColon = { pendingColon },
+                            pendingAlias = { pendingAlias },
+                            setPendingAlias = { pendingAlias = it },
+                            setPendingColon = { pendingColon = it },
+                        )
+                        "HIGHLIGHT" -> appendHighlight(content, child, annotatorSettings)
+                        "EQUALS", "=" -> append('=')
+                        "DOLLAR", "$" -> append('$')
+                        "INLINE_MATH", "BLOCK_MATH" -> append(child.getTextInNode(content))
+                        "EMAIL_AUTOLINK" -> if (parentType == MarkdownElementTypes.LINK_TEXT) {
+                            append(child.getUnescapedTextInNode(content))
+                        } else appendEmailAutoLink(content, child, annotatorSettings)
+                        "~" -> if (parentType != GFMElementTypes.STRIKETHROUGH) {
+                            append(child.getTextInNode(content))
+                        }
                     }
                 }
             }
@@ -404,4 +504,170 @@ fun AnnotatedString.Builder.buildMarkdownAnnotatedString(
             skipIfNext = null
         }
     }
+    if (pendingColon != null) append(':')
+    if (pendingAlias != null) {
+        appendInlineText(content, pendingAlias!!, emojiShortcodes, localOnly = true)
+    }
+}
+
+private fun isEmojiAliasNode(node: ASTNode): Boolean =
+    isEmojiAliasType(node.type.name) && node.startOffset < node.endOffset
+
+private fun isEmojiAliasType(type: String): Boolean =
+    type == MarkdownTokenTypes.TEXT.name || type == "TEXT"
+
+private fun isEmojiClosingColon(node: ASTNode): Boolean =
+    node.type.name == MarkdownTokenTypes.COLON.name || node.type.name == ":"
+
+private fun AnnotatedString.Builder.appendInlineText(
+    content: String,
+    node: ASTNode,
+    emojiShortcodes: MarkdownEmojiShortcodes?,
+    localOnly: Boolean = false,
+) {
+    append(childTextWithEmoji(content, node, emojiShortcodes, localOnly))
+}
+
+private fun AnnotatorSettings.withoutEmojiShortcodes(): AnnotatorSettings =
+    if (emojiShortcodes == null) {
+        this
+    } else {
+        object : AnnotatorSettings by this {
+            override val emojiShortcodes: MarkdownEmojiShortcodes? = null
+        }
+    }
+
+/**
+ * Colon-delimited aliases are assembled from parser token boundaries. This
+ * keeps literal shortcodes inside code spans and link destinations intact and
+ * leaves incomplete aliases unchanged while a stream is still being appended.
+ */
+private fun AnnotatedString.Builder.handleColonToken(
+    content: String,
+    children: List<ASTNode>,
+    index: Int,
+    node: ASTNode,
+    parentType: org.intellij.markdown.IElementType?,
+    emojiShortcodes: MarkdownEmojiShortcodes?,
+    pendingColon: () -> ASTNode?,
+    pendingAlias: () -> ASTNode?,
+    setPendingAlias: (ASTNode?) -> Unit,
+    setPendingColon: (ASTNode?) -> Unit,
+) {
+    val protectedContext = parentType == MarkdownElementTypes.CODE_SPAN ||
+        parentType == MarkdownElementTypes.LINK_TEXT ||
+        parentType == MarkdownElementTypes.LINK_DESTINATION ||
+        parentType == MarkdownElementTypes.LINK_LABEL ||
+        parentType == MarkdownElementTypes.INLINE_LINK ||
+        parentType == MarkdownElementTypes.AUTOLINK ||
+        parentType == MarkdownElementTypes.FULL_REFERENCE_LINK ||
+        parentType == MarkdownElementTypes.SHORT_REFERENCE_LINK
+    if (protectedContext || emojiShortcodes == null) {
+        append(':')
+        return
+    }
+    val opening = pendingColon()
+    val alias = pendingAlias()
+    if (opening != null && alias != null) {
+        val aliasText = content.substring(alias.startOffset, alias.endOffset)
+        val replacement = emojiShortcodes.resolve(aliasText)
+        if (replacement.isNullOrEmpty()) {
+            append(':')
+            appendInlineText(
+                content = content,
+                node = alias,
+                emojiShortcodes = emojiShortcodes,
+                localOnly = true,
+            )
+            append(':')
+        } else {
+            append(replacement)
+        }
+        setPendingColon(null)
+        setPendingAlias(null)
+        return
+    }
+    if (opening == null) {
+        val next = children.getOrNull(index + 1)
+        if (next != null && isEmojiAliasNode(next) && isEmojiAliasBoundary(content, node.endOffset)) {
+            setPendingColon(node)
+        } else {
+            append(':')
+        }
+        return
+    }
+
+    append(':')
+    setPendingColon(null)
+    setPendingAlias(null)
+}
+
+private fun isEmojiAliasBoundary(content: String, offset: Int): Boolean =
+    offset == 0 || content[offset - 1] != '\\'
+
+private fun childTextWithEmoji(
+    content: String,
+    node: ASTNode,
+    emojiShortcodes: MarkdownEmojiShortcodes?,
+    localOnly: Boolean,
+): String {
+    val source = node.getUnescapedTextInNode(content)
+    if (emojiShortcodes == null || source.indexOf(':') < 0 || '\\' in source ||
+        node.startOffset + source.length != node.endOffset
+    ) {
+        return source
+    }
+    return buildString(source.length) {
+        var index = 0
+        var pendingOpening = -1
+        while (index < source.length) {
+            val char = source[index]
+            if (char == ':') {
+                if (pendingOpening >= 0) {
+                    val alias = source.substring(pendingOpening + 1, index)
+                    val replacement = emojiShortcodes.resolve(alias)
+                    if (replacement.isNullOrEmpty()) {
+                        append(':')
+                        append(alias)
+                        append(':')
+                    } else {
+                        append(replacement)
+                    }
+                    pendingOpening = -1
+                } else {
+                    pendingOpening = index
+                }
+            } else if (pendingOpening >= 0 &&
+                !(char.isLetterOrDigit() || char == '_' || char == '+' || char == '-')
+            ) {
+                append(':')
+                append(source, pendingOpening + 1, index)
+                append(char)
+                pendingOpening = -1
+            } else if (pendingOpening < 0) {
+                append(char)
+            }
+            index++
+        }
+        if (pendingOpening >= 0) {
+            append(':')
+            append(source, pendingOpening + 1, source.length)
+        }
+        val rendered = toString()
+        return if (localOnly && rendered.endsWith(":")) rendered.dropLast(1) else rendered
+    }
+}
+
+private fun AnnotatedString.Builder.appendHighlight(
+    content: String,
+    child: ASTNode,
+    annotatorSettings: AnnotatorSettings,
+) {
+    pushStyle(annotatorSettings.highlightSpanStyle)
+    buildMarkdownAnnotatedString(
+        content,
+        child.children.drop(2).dropLast(2),
+        annotatorSettings
+    )
+    pop()
 }

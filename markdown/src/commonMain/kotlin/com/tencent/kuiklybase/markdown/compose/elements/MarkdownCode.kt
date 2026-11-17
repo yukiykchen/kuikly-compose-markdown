@@ -2,6 +2,7 @@ package com.tencent.kuiklybase.markdown.compose.elements
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import com.tencent.kuikly.compose.foundation.BorderStroke
 import com.tencent.kuikly.compose.foundation.background
 import com.tencent.kuikly.compose.foundation.border
@@ -15,15 +16,19 @@ import com.tencent.kuikly.compose.ui.draw.clip
 import com.tencent.kuikly.compose.ui.draw.shadow
 import com.tencent.kuikly.compose.ui.graphics.Color
 import com.tencent.kuikly.compose.ui.graphics.Shape
+import com.tencent.kuikly.compose.ui.text.AnnotatedString
 import com.tencent.kuikly.compose.ui.text.TextStyle
 import com.tencent.kuikly.compose.ui.unit.Dp
 import com.tencent.kuikly.compose.ui.unit.LayoutDirection
 import com.tencent.kuikly.compose.ui.unit.dp
 import com.tencent.kuiklybase.markdown.compose.LocalMarkdownColors
+import com.tencent.kuiklybase.markdown.compose.LocalMarkdownCodeHighlighter
 import com.tencent.kuiklybase.markdown.compose.LocalMarkdownDimens
 import com.tencent.kuiklybase.markdown.compose.LocalMarkdownPadding
 import com.tencent.kuiklybase.markdown.compose.LocalMarkdownTypography
 import com.tencent.kuiklybase.markdown.compose.elements.material.MarkdownBasicText
+import com.tencent.kuiklybase.markdown.model.buildHighlightedCodeString
+import com.tencent.kuiklybase.markdown.model.sliceForChunk
 import org.intellij.markdown.MarkdownTokenTypes
 import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.findChildOfType
@@ -35,14 +40,24 @@ fun MarkdownCode(
     language: String?,
     style: TextStyle = LocalMarkdownTypography.current.code,
     chunkCharacters: Int = 4096,
+    highlighterEnabled: Boolean = true,
+    showLanguageHeader: Boolean = true,
 ) {
     val backgroundCodeColor = LocalMarkdownColors.current.codeBackground
     val codeBackgroundCornerSize = LocalMarkdownDimens.current.codeBackgroundCornerSize
     val codeBlockPadding = LocalMarkdownPadding.current.codeBlock
+    val highlighter = LocalMarkdownCodeHighlighter.current
+    val highlighted = if (highlighterEnabled) {
+        remember(code, language, highlighter, style) { highlighter.highlight(code, language) }
+    } else {
+        emptyList()
+    }
     MarkdownCodeBackground(
         color = backgroundCodeColor,
         shape = RoundedCornerShape(codeBackgroundCornerSize),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        language = language,
+        showLanguageHeader = showLanguageHeader,
     ) {
         Column(
             modifier = Modifier.padding(
@@ -52,10 +67,15 @@ fun MarkdownCode(
                     bottom = codeBlockPadding.calculateBottomPadding(),
                 ),
         ) {
-            splitMarkdownCodeLines(code, chunkCharacters).forEachIndexed { index, text ->
-                key(index) {
+            splitMarkdownCodeChunks(code, chunkCharacters).forEach { chunk ->
+                key(chunk.startOffset) {
                     MarkdownBasicText(
-                        text = text,
+                        text = remember(chunk.text, highlighted, style) {
+                            buildHighlightedCodeString(
+                                chunk.text,
+                                highlighted.sliceForChunk(chunk.startOffset, chunk.endOffset),
+                            )
+                        },
                         color = LocalMarkdownColors.current.codeText,
                         style = style,
                         modifier = Modifier,
@@ -65,6 +85,12 @@ fun MarkdownCode(
         }
     }
 }
+
+internal data class MarkdownCodeChunk(
+    val text: String,
+    val startOffset: Int,
+    val endOffset: Int,
+)
 
 /** Split only between complete lines: joining the chunks with LF reproduces the input exactly. */
 internal fun splitMarkdownCodeLines(code: String, chunkCharacters: Int): List<String> {
@@ -85,6 +111,20 @@ internal fun splitMarkdownCodeLines(code: String, chunkCharacters: Int): List<St
         lineCount++
     }
     chunks.add(current.toString())
+    return chunks
+}
+
+/** Preserves absolute offsets so token styles can be sliced per complete-line chunk. */
+internal fun splitMarkdownCodeChunks(code: String, chunkCharacters: Int): List<MarkdownCodeChunk> {
+    require(chunkCharacters > 0)
+    if (code.length <= chunkCharacters) return listOf(MarkdownCodeChunk(code, 0, code.length))
+    val chunks = mutableListOf<MarkdownCodeChunk>()
+    val lines = splitMarkdownCodeLines(code, chunkCharacters)
+    var start = 0
+    lines.forEachIndexed { index, text ->
+        chunks += MarkdownCodeChunk(text, start, start + text.length)
+        if (index < lines.lastIndex) start += text.length + 1 // one LF separator between chunks
+    }
     return chunks
 }
 
@@ -139,6 +179,8 @@ fun MarkdownCodeBackground(
     shape: Shape = RoundedCornerShape(0F),
     border: BorderStroke? = null,
     elevation: Dp = 0.dp,
+    language: String? = null,
+    showLanguageHeader: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     Box(
@@ -148,6 +190,20 @@ fun MarkdownCodeBackground(
             .background(color = color)
             .clip(shape)
     ) {
-        content()
+        Column {
+            if (showLanguageHeader && !language.isNullOrBlank()) {
+                MarkdownBasicText(
+                    text = language.uppercase(),
+                    color = LocalMarkdownColors.current.codeText,
+                    style = LocalMarkdownTypography.current.code,
+                    modifier = Modifier.padding(start = 8.dp, top = 4.dp, end = 8.dp),
+                )
+                MarkdownDivider(
+                    color = LocalMarkdownColors.current.dividerColor,
+                    thickness = 0.5.dp,
+                )
+            }
+            content()
+        }
     }
 }

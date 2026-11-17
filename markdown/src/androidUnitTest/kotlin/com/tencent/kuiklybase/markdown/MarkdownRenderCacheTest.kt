@@ -20,17 +20,38 @@ class MarkdownRenderCacheTest {
         val settings = FakeAnnotatorSettings
         var builds = 0
 
-        val first = cache.getOrPut("hello", node, style, settings) {
+        val first = cache.getOrPut("hello", node, style, settings, build = {
             builds++
             AnnotatedString("first")
-        }
-        val second = cache.getOrPut("hello", node, style, settings) {
+        })
+        val second = cache.getOrPut("hello", node, style, settings, build = {
             builds++
             AnnotatedString("second")
-        }
+        })
 
         assertSame(first, second)
         assertEquals(1, builds)
+    }
+
+    @Test
+    fun `link generation change rebuilds rendered text`() {
+        val cache = MarkdownRenderCache()
+        val node = FakeNode(0, 5)
+        val style = TextStyle.Default
+        val settings = FakeAnnotatorSettings
+        val first = cache.getOrPut(
+            "hello", node, style, settings,
+            build = { AnnotatedString("before") },
+            generation = 0,
+        )
+        val second = cache.getOrPut(
+            "hello", node, style, settings,
+            build = { AnnotatedString("after") },
+            generation = 1,
+        )
+
+        assertEquals("before", first.text)
+        assertEquals("after", second.text)
     }
 
     private data class FakeNode(
@@ -45,6 +66,7 @@ class MarkdownRenderCacheTest {
     private object FakeAnnotatorSettings : AnnotatorSettings {
         override val linkTextSpanStyle = com.tencent.kuikly.compose.ui.text.TextLinkStyles()
         override val codeSpanStyle = com.tencent.kuikly.compose.ui.text.SpanStyle()
+        override val highlightSpanStyle = com.tencent.kuikly.compose.ui.text.SpanStyle()
         override val annotator = com.tencent.kuiklybase.markdown.model.DefaultMarkdownAnnotator(
             null,
             null,

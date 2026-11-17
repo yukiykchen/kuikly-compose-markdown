@@ -8,14 +8,18 @@ import com.tencent.kuiklybase.markdown.model.BulletHandler
 import com.tencent.kuiklybase.markdown.model.DefaultMarkdownAnnotator
 import com.tencent.kuiklybase.markdown.model.DefaultMarkdownAnnotatorConfig
 import com.tencent.kuiklybase.markdown.model.DefaultMarkdownExtendedSpans
+import com.tencent.kuiklybase.markdown.model.DefaultMarkdownCodeHighlighterInstance
+import com.tencent.kuiklybase.markdown.model.DefaultMarkdownEmojiShortcodes
 import com.tencent.kuiklybase.markdown.model.ImageLinkHandler
 import com.tencent.kuiklybase.markdown.model.ImageLinkHandlerImpl
 import com.tencent.kuiklybase.markdown.model.ImageTransformer
 import com.tencent.kuiklybase.markdown.model.MarkdownAnimations
 import com.tencent.kuiklybase.markdown.model.MarkdownAnnotator
 import com.tencent.kuiklybase.markdown.model.MarkdownColors
+import com.tencent.kuiklybase.markdown.model.MarkdownCodeHighlighter
 import com.tencent.kuiklybase.markdown.model.MarkdownDimens
 import com.tencent.kuiklybase.markdown.model.MarkdownExtendedSpans
+import com.tencent.kuiklybase.markdown.model.MarkdownEmojiShortcodes
 import com.tencent.kuiklybase.markdown.model.MarkdownRenderCache
 import com.tencent.kuiklybase.markdown.model.MarkdownPadding
 import com.tencent.kuiklybase.markdown.model.MarkdownTypography
@@ -111,6 +115,19 @@ val LocalMarkdownComponents = compositionLocalOf<MarkdownComponents> {
     return@compositionLocalOf markdownComponents()
 }
 
+/** Replaces the tokenizer used by the default code-block renderer. */
+val LocalMarkdownCodeHighlighter = staticCompositionLocalOf<MarkdownCodeHighlighter> {
+    DefaultMarkdownCodeHighlighterInstance
+}
+
+/**
+ * Optional GitHub-style `:shortcode:` replacement for ordinary prose.
+ * Set to null to preserve shortcodes as literal text.
+ */
+val LocalMarkdownEmojiShortcodes = staticCompositionLocalOf<MarkdownEmojiShortcodes?> {
+    DefaultMarkdownEmojiShortcodes
+}
+
 /**
  * Local [MarkdownAnimations] provider
  */
@@ -120,3 +137,6 @@ val LocalMarkdownAnimations = compositionLocalOf<MarkdownAnimations> {
 
 /** Cache for rendered inline text that survives LazyColumn item disposal. */
 val LocalMarkdownRenderCache = staticCompositionLocalOf<MarkdownRenderCache?> { null }
+
+/** Generation for inline text affected by a late Markdown reference definition. */
+val LocalMarkdownBlockLinkGeneration = staticCompositionLocalOf { 0 }

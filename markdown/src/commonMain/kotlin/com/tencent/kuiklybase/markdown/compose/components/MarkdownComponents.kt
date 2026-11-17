@@ -7,6 +7,7 @@ import com.tencent.kuikly.compose.ui.Modifier
 import com.tencent.kuiklybase.markdown.utils.getUnescapedTextInNode
 import com.tencent.kuiklybase.markdown.compose.LocalReferenceLinkHandler
 import com.tencent.kuiklybase.markdown.compose.elements.MarkdownBlockQuote
+import com.tencent.kuiklybase.markdown.compose.elements.MarkdownAlert
 import com.tencent.kuiklybase.markdown.compose.elements.MarkdownBulletList
 import com.tencent.kuiklybase.markdown.compose.elements.MarkdownCheckBox
 import com.tencent.kuiklybase.markdown.compose.elements.MarkdownCodeBlock
@@ -20,6 +21,8 @@ import com.tencent.kuiklybase.markdown.compose.elements.MarkdownTable
 import com.tencent.kuiklybase.markdown.compose.elements.MarkdownText
 import com.tencent.kuiklybase.markdown.compose.elements.listDepth
 import com.tencent.kuiklybase.markdown.model.MarkdownTypography
+import com.tencent.kuiklybase.markdown.model.MarkdownAlertType
+import com.tencent.kuiklybase.markdown.model.findAlertType
 import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.persistentMapOf
 import org.intellij.markdown.IElementType
@@ -70,6 +73,7 @@ fun markdownComponents(
     horizontalRule: MarkdownComponent = CurrentComponentsBridge.horizontalRule,
     table: MarkdownComponent = CurrentComponentsBridge.table,
     checkbox: MarkdownComponent = CurrentComponentsBridge.checkbox,
+    alert: MarkdownComponent = CurrentComponentsBridge.alert,
     custom: CustomMarkdownComponent? = CurrentComponentsBridge.custom,
 ): MarkdownComponents = DefaultMarkdownComponents(
     text = text,
@@ -93,6 +97,7 @@ fun markdownComponents(
     horizontalRule = horizontalRule,
     table = table,
     checkbox = checkbox,
+    alert = alert,
     custom = custom,
 )
 
@@ -124,6 +129,7 @@ interface MarkdownComponents {
     val horizontalRule: MarkdownComponent
     val table: MarkdownComponent
     val checkbox: MarkdownComponent
+    val alert: MarkdownComponent
     val custom: CustomMarkdownComponent?
 }
 
@@ -151,6 +157,7 @@ private class DefaultMarkdownComponents(
     override val horizontalRule: MarkdownComponent,
     override val table: MarkdownComponent,
     override val checkbox: MarkdownComponent,
+    override val alert: MarkdownComponent,
     override val custom: CustomMarkdownComponent?,
 ) : MarkdownComponents
 
@@ -236,6 +243,10 @@ object CurrentComponentsBridge {
     }
     val checkbox: MarkdownComponent = {
         MarkdownCheckBox(it.content, it.node, style = it.typography.text)
+    }
+    val alert: MarkdownComponent = {
+        val type = it.node.findAlertType(it.content) ?: MarkdownAlertType.NOTE
+        MarkdownAlert(it.content, it.node, type, style = it.typography.alertTitle)
     }
     val custom: CustomMarkdownComponent? = null
 }

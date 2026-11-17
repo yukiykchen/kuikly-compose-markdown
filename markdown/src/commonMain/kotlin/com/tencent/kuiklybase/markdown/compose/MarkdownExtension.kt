@@ -77,7 +77,12 @@ fun handleElement(
 
         TABLE -> components.table(model)
         else -> {
-            handled = components.custom?.invoke(node.type, model) != null
+            if (node.type.name == "ALERT") {
+                components.alert(model)
+                handled = true
+            } else {
+                handled = components.custom?.invoke(node.type, model) != null
+            }
         }
     }
 
@@ -134,7 +139,12 @@ fun handleElement(
         HORIZONTAL_RULE -> components.horizontalRule(model)
         TABLE -> components.table(model)
         else -> {
-            handled = components.custom?.invoke(nodeType, model) != null
+            if (nodeType.name == "ALERT") {
+                components.alert(model)
+                handled = true
+            } else {
+                handled = components.custom?.invoke(nodeType, model) != null
+            }
         }
     }
 

@@ -16,7 +16,7 @@ plugins {
 }
 
 group = "com.tencent.kuiklybase"
-version = "0.4.3"
+version = "0.4.4"
 
 publishing {
     repositories {
@@ -80,7 +80,6 @@ kotlin {
     }
 
     val commonMain by sourceSets.getting {
-
         dependencies {
                 implementation(libs.kotlin.stdlib)
                 api(libs.kotlinx.coroutines.core)
@@ -95,6 +94,24 @@ kotlin {
                     exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
                 }
             }
+    }
+
+    val nativeStreamingMain by sourceSets.creating {
+        dependsOn(commonMain)
+    }
+
+    val nativeMain by sourceSets.creating {
+        dependsOn(commonMain)
+    }
+
+    sourceSets.matching {
+        it.name in setOf(
+            "androidMain", "jsMain", "iosArm64Main", "iosX64Main",
+            "iosSimulatorArm64Main", "macosX64Main", "macosArm64Main",
+        )
+    }.configureEach {
+        dependsOn(nativeStreamingMain)
+        if (name !in setOf("androidMain", "jsMain")) dependsOn(nativeMain)
     }
 
     val androidUnitTest by sourceSets.getting {

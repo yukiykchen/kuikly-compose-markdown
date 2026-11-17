@@ -8,7 +8,7 @@ cd "$ROOT"
 : "${KUIKLY_OPEN_MAVEN_PASSWORD:?missing public Maven password}"
 REPO_URL="${KUIKLY_OPEN_MAVEN_REPO_URL:-https://mirrors.tencent.com/repository/maven/kuikly-open/}"
 
-# The KBA OHOS release uses build.ohos.gradle.kts and version 0.4.3-ohos.
+# The KBA OHOS release uses build.ohos.gradle.kts and version 0.4.4-ohos.
 export COMPAT_BUILD_TYPE=ohos
 export JAVA_HOME="$(/usr/libexec/java_home -v 17)"
 export PATH="$JAVA_HOME/bin:$PATH"

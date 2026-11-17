@@ -29,6 +29,7 @@ kotlin {
 
     sourceSets {
         val commonMain by getting {
+            kotlin.srcDir("src/aiChat230Main/kotlin")
             dependencies {
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlin.stdlib)

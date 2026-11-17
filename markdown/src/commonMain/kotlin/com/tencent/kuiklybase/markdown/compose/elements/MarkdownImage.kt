@@ -8,21 +8,24 @@ import com.tencent.kuiklybase.markdown.utils.findChildOfTypeRecursive
 import com.tencent.kuiklybase.markdown.utils.getUnescapedTextInNode
 import com.tencent.kuiklybase.markdown.compose.LocalImageLinkHandler
 import com.tencent.kuiklybase.markdown.compose.LocalImageTransformer
+import com.tencent.kuiklybase.markdown.compose.LocalReferenceLinkHandler
+import com.tencent.kuiklybase.markdown.utils.resolveImageAlt
+import com.tencent.kuiklybase.markdown.utils.resolveImageLink
 import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.ast.ASTNode
 
 @Composable
 fun MarkdownImage(content: String, node: ASTNode) {
 
-    val link =
-        node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getUnescapedTextInNode(content) ?: return
+    val link = node.resolveImageLink(content, LocalReferenceLinkHandler.current) ?: return
+    val alt = node.resolveImageAlt(content)
     val imageHandler = LocalImageLinkHandler.current
 
     LocalImageTransformer.current.transform(link, null)?.let { imageData ->
         imageHandler.store(imageData)
         Image(
             painter = imageData.painter,
-            contentDescription = imageData.contentDescription,
+            contentDescription = alt ?: imageData.contentDescription,
             modifier = Modifier
                 .clickable { imageHandler.preview(imageData) }
                 .then(imageData.modifier),

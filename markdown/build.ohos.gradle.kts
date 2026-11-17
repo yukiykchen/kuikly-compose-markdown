@@ -15,7 +15,7 @@ plugins {
 }
 
 group = "com.tencent.kuiklybase"
-version = "0.4.3-ohos"
+version = "0.4.4-ohos"
 
 publishing {
     repositories {
@@ -46,6 +46,14 @@ kotlin {
 
     ohosArm64()
 
+    targets.configureEach {
+        compilations.configureEach {
+            compilerOptions.configure {
+                freeCompilerArgs.add("-opt-in=org.intellij.markdown.ExperimentalApi")
+            }
+        }
+    }
+
     val commonMain by sourceSets.getting {
 
         dependencies {
@@ -54,7 +62,8 @@ kotlin {
             compileOnly(libs.kuikly.compose)
             compileOnly(libs.kuikly.core.annotation)
 
-            val markdownDep = libs.jetbrains.markdown.get().let { "${it.module}:${it.version}" }
+            // The standard parser has no ohos_arm64 klib. OHOS uses the KBA-compatible fork.
+            val markdownDep = "com.tencent.kuiklybase:markdown-parser:0.7.4-ohos"
             api(markdownDep) {
                 exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
             }

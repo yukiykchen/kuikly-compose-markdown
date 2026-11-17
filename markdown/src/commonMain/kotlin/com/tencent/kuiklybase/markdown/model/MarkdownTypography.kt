@@ -6,6 +6,7 @@ import com.tencent.kuikly.compose.ui.text.TextStyle
 import com.tencent.kuikly.compose.ui.graphics.Color
 import com.tencent.kuikly.compose.ui.text.font.FontWeight
 import com.tencent.kuikly.compose.ui.unit.sp
+import com.tencent.kuiklybase.markdown.model.defaultAlertTitleStyle
 
 interface MarkdownTypography {
     val text: TextStyle
@@ -27,6 +28,9 @@ interface MarkdownTypography {
     val link: TextStyle
     val textLink: TextLinkStyles
     val table: TextStyle
+
+    /** Style of a GitHub alert title. */
+    val alertTitle: TextStyle get() = defaultAlertTitleStyle(text)
 }
 
 @Immutable
@@ -49,4 +53,5 @@ class DefaultMarkdownTypography(
     override val link: TextStyle = text.copy(color = Color(0xFF1769AA)),
     override val textLink: TextLinkStyles = TextLinkStyles(style = link.toSpanStyle()),
     override val table: TextStyle = text,
+    override val alertTitle: TextStyle = defaultAlertTitleStyle(text),
 ) : MarkdownTypography

@@ -18,6 +18,7 @@ import com.tencent.kuiklybase.markdown.model.MarkdownAnnotator
 import com.tencent.kuiklybase.markdown.model.MarkdownColors
 import com.tencent.kuiklybase.markdown.model.MarkdownDimens
 import com.tencent.kuiklybase.markdown.model.MarkdownExtendedSpans
+import com.tencent.kuiklybase.markdown.model.MarkdownEmojiShortcodes
 import com.tencent.kuiklybase.markdown.model.MarkdownPadding
 import com.tencent.kuiklybase.markdown.model.MarkdownState
 import com.tencent.kuiklybase.markdown.model.MarkdownTypography
@@ -39,6 +40,7 @@ import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.parser.CancellationToken
 import org.intellij.markdown.parser.MarkdownParser
+import com.tencent.kuiklybase.markdown.compat.createMarkdownParser
 
 
 /**
@@ -73,7 +75,9 @@ fun Markdown(
     padding: MarkdownPadding = markdownPadding(),
     dimens: MarkdownDimens = markdownDimens(),
     flavour: MarkdownFlavourDescriptor = remember { GFMFlavourDescriptor() },
-    parser: MarkdownParser = remember(flavour) { MarkdownParser(flavour, cancellationToken = CancellationToken.NonCancellable) },
+    parser: MarkdownParser = remember(flavour) {
+        createMarkdownParser(flavour, CancellationToken.NonCancellable)
+    },
     imageTransformer: ImageTransformer = NoOpImageTransformerImpl(),
     imageLinkHandler: ImageLinkHandler = ImageLinkHandlerImpl(),
     textProvider: TextProvider = NoOpTextProvider(),
@@ -82,6 +86,7 @@ fun Markdown(
     components: MarkdownComponents = remember { markdownComponents() },
     animations: MarkdownAnimations = markdownAnimations(),
     referenceLinkHandler: ReferenceLinkHandler = remember { ReferenceLinkHandlerImpl() },
+    emojiShortcodes: MarkdownEmojiShortcodes? = LocalMarkdownEmojiShortcodes.current,
     loading: @Composable (modifier: Modifier) -> Unit = { Box(modifier = modifier) },
     success: @Composable (state: MarkdownState, components: MarkdownComponents, modifier: Modifier) -> Unit = { state, components, modifier ->
         MarkdownSuccess(state = state, components = components, modifier = modifier)
@@ -108,6 +113,7 @@ fun Markdown(
         components = components,
         animations = animations,
         referenceLinkHandler = referenceLinkHandler,
+        emojiShortcodes = emojiShortcodes,
         loading = loading,
         success = success,
         error = error
@@ -150,6 +156,7 @@ fun Markdown(
     components: MarkdownComponents = remember { markdownComponents() },
     animations: MarkdownAnimations = markdownAnimations(),
     referenceLinkHandler: ReferenceLinkHandler = state.referenceLinkHandler,
+    emojiShortcodes: MarkdownEmojiShortcodes? = LocalMarkdownEmojiShortcodes.current,
     loading: @Composable (modifier: Modifier) -> Unit = { Box(modifier = modifier) },
     success: @Composable (state: MarkdownState, components: MarkdownComponents, modifier: Modifier) -> Unit = { state, components, modifier ->
         MarkdownSuccess(state = state, components = components, modifier = modifier)
@@ -169,6 +176,7 @@ fun Markdown(
         LocalMarkdownExtendedSpans provides extendedSpans,
         LocalMarkdownComponents provides components,
         LocalMarkdownAnimations provides animations,
+        LocalMarkdownEmojiShortcodes provides emojiShortcodes,
     ) {
         success(state, components, modifier)
     }
@@ -176,9 +184,9 @@ fun Markdown(
 }
 
 /**
- * Renders append-only streaming Markdown using the snapshot's stable AST and
- * unstable tail. The default success slot uses [LazyMarkdownSuccess] so only
- * visible blocks are composed.
+ * Renders append-only streaming Markdown using stable block slots and a
+ * changing active tail. The default success slot is non-scrolling so a host
+ * chat list can own scrolling and stick-to-bottom behavior.
  */
 @Composable
 fun Markdown(
@@ -196,14 +204,12 @@ fun Markdown(
     components: MarkdownComponents = remember { markdownComponents() },
     animations: MarkdownAnimations = markdownAnimations(),
     referenceLinkHandler: ReferenceLinkHandler = streamingMarkdownState.referenceLinkHandler,
+    emojiShortcodes: MarkdownEmojiShortcodes? = LocalMarkdownEmojiShortcodes.current,
     success: @Composable (state: StreamingMarkdownState, components: MarkdownComponents, modifier: Modifier) -> Unit =
         { state, markdownComponents, successModifier ->
-            LazyMarkdownSuccess(
+            StreamingMarkdownContent(
                 streamingMarkdownState = state,
                 components = markdownComponents,
-                modifier = successModifier,
-                precomposeAll = true,
-                singleItem = true,
             )
         },
 ) {
@@ -221,6 +227,7 @@ fun Markdown(
         LocalMarkdownExtendedSpans provides extendedSpans,
         LocalMarkdownComponents provides components,
         LocalMarkdownAnimations provides animations,
+        LocalMarkdownEmojiShortcodes provides emojiShortcodes,
     ) {
         success(streamingMarkdownState, components, modifier)
     }

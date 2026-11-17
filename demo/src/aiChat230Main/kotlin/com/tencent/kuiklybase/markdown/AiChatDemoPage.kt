@@ -18,16 +18,16 @@ import com.tencent.kuikly.compose.foundation.layout.Arrangement
 import com.tencent.kuikly.compose.foundation.layout.Column
 import com.tencent.kuikly.compose.foundation.layout.Row
 import com.tencent.kuikly.compose.foundation.layout.Spacer
-import com.tencent.kuikly.compose.foundation.layout.fillMaxHeight
 import com.tencent.kuikly.compose.foundation.layout.fillMaxSize
+import com.tencent.kuikly.compose.foundation.layout.fillMaxHeight
 import com.tencent.kuikly.compose.foundation.layout.fillMaxWidth
 import com.tencent.kuikly.compose.foundation.layout.height
 import com.tencent.kuikly.compose.foundation.layout.padding
 import com.tencent.kuikly.compose.foundation.layout.width
-import com.tencent.kuikly.compose.foundation.layout.wrapContentHeight
+import com.tencent.kuikly.compose.foundation.gestures.scrollBy
 import com.tencent.kuikly.compose.foundation.lazy.LazyColumn
+import com.tencent.kuikly.compose.foundation.lazy.LazyListState
 import com.tencent.kuikly.compose.foundation.lazy.items
-import com.tencent.kuikly.compose.foundation.lazy.rememberLazyListState
 import com.tencent.kuikly.compose.foundation.shape.RoundedCornerShape
 import com.tencent.kuikly.compose.material3.Button
 import com.tencent.kuikly.compose.material3.Text
@@ -62,6 +62,7 @@ import com.tencent.kuiklybase.markdown.compose.MarkdownSnapshotContent
 import com.tencent.kuiklybase.markdown.compose.LocalMarkdownTypography
 import com.tencent.kuiklybase.markdown.compose.LocalReferenceLinkHandler
 import com.tencent.kuiklybase.markdown.compose.LocalTextProvider
+import com.tencent.kuiklybase.markdown.compose.rememberStreamingMarkdownListState
 import com.tencent.kuiklybase.markdown.compose.components.markdownComponents
 import com.tencent.kuiklybase.markdown.demo.markdownColor
 import com.tencent.kuiklybase.markdown.demo.markdownTypography
@@ -76,6 +77,7 @@ import com.tencent.kuiklybase.markdown.model.NoOpTextProvider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
@@ -93,6 +95,9 @@ class AiChatDemoPage : ComposeContainer() {
     private var messages by mutableStateOf(listOf(ChatMessage(assistant = true, text = DEFAULT_PROMPT)))
     private var input by mutableStateOf(DEFAULT_PROMPT)
     private var isStreaming by mutableStateOf(false)
+    private var autoFollow by mutableStateOf(true)
+    private var programmaticScrolling by mutableStateOf(false)
+    private var finalCommitPending = false
     private var status by mutableStateOf("Ready")
     private var requestVersion by mutableStateOf(0)
     private val pendingText = StringBuilder()
@@ -104,7 +109,6 @@ class AiChatDemoPage : ComposeContainer() {
     private var recompositionProfilerStarted = false
     private var diagnosticsEnabled = false
     private var activeRequest: NetworkModule.StreamRequestHandle? = null
-    private var autoFollowOutput = true
 
     override fun created() {
         super.created()
@@ -136,47 +140,59 @@ class AiChatDemoPage : ComposeContainer() {
 
     @Composable
     private fun AiChatScreen() {
-        val listState = rememberLazyListState()
+        val listState = rememberStreamingMarkdownListState(
+            aheadFraction = 1.0f,
+            behindFraction = 1.0f,
+        )
         val markdownState: StreamingMarkdownState = rememberStreamingMarkdownState(
             diagnosticsEnabled = diagnosticsEnabled,
         )
         val components = remember { markdownComponents() }
         val hasAnswer by markdownState.hasRenderableBlocks.collectAsState()
-        val contentLength by snapshotFlow { markdownState.contentLength }
-            .collectAsState(initial = 0)
         DisposableEffect(Unit) {
             onDispose { activeRequest?.close() }
         }
-        // Keep new text visible while streaming, but stop following when the user scrolls up.
-        LaunchedEffect(listState) {
-            snapshotFlow {
-                val info = listState.layoutInfo
-                val last = info.visibleItemsInfo.lastOrNull()
-                val lastIndex = info.totalItemsCount - 1
-                val bottomDistance = if (last != null && last.index == lastIndex) {
-                    info.viewportEndOffset - (last.offset + last.size)
-                } else Int.MAX_VALUE
-                Triple(bottomDistance, listState.lastScrolledBackward, listState.isScrollInProgress)
-            }.collect { (bottomDistance, scrolledBackward, scrolling) ->
-                if (scrolledBackward && scrolling) autoFollowOutput = false
-                if (bottomDistance in 0..96) autoFollowOutput = true
-            }
+        if (diagnosticsEnabled) {
+            SideEffect { markdownState.recompositionCounters.recordScreen() }
         }
-        LaunchedEffect(contentLength, hasAnswer, autoFollowOutput, isStreaming) {
-            if (!autoFollowOutput || !hasAnswer || !isStreaming) return@LaunchedEffect
-            withFrameNanos { }
-            listState.scroll {
-                var remaining = listState.layoutInfo.viewportSize.height.toFloat()
-                var attempts = 0
-                while (remaining > 0f && attempts++ < 8) {
-                    val delta = scrollBy(remaining)
-                    if (delta <= 0f) break
-                    remaining -= delta
+
+        // A user gesture away from the bottom disables following. Only the user
+        // scrolling back near the bottom re-enables it; content commits never do.
+        LaunchedEffect(listState, isStreaming, markdownState) {
+            if (!isStreaming) return@LaunchedEffect
+            snapshotFlow {
+                listState.isScrollInProgress to isNearBottom(listState)
+            }.collect { (scrolling, nearBottom) ->
+                if (!isStreaming || programmaticScrolling) return@collect
+                if (scrolling && !nearBottom && autoFollow) {
+                    autoFollow = false
+                    markdownState.pauseUiUpdates()
+                    status = "Reading history"
+                } else if (nearBottom && !autoFollow) {
+                    autoFollow = true
+                    if (!markdownState.uiUpdatesEnabled.value) markdownState.resumeUiUpdates()
+                    status = "Streaming via Kuikly 2.30 httpStreamRequest"
+                    if (finalCommitPending) {
+                        finalCommitPending = false
+                        markdownState.finish()
+                        saveRestoredMarkdown(markdownState.content.toString())
+                        status = "Completed"
+                        isStreaming = false
+                    }
                 }
             }
         }
-        if (diagnosticsEnabled) {
-            SideEffect { markdownState.recompositionCounters.recordScreen() }
+
+        // The update hook: every committed UI revision is a layout-visible content
+        // change. Follow the footer only while autoFollow is true.
+        LaunchedEffect(markdownState, autoFollow) {
+            if (!autoFollow) return@LaunchedEffect
+            markdownState.contentRevision.collectLatest {
+                withFrameNanos { }
+                withFrameNanos { }
+                if (!autoFollow) return@collectLatest
+                scrollChatToBottom(listState)
+            }
         }
 
         LaunchedEffect(requestVersion) {
@@ -184,13 +200,7 @@ class AiChatDemoPage : ComposeContainer() {
             if (requestVersion > 0 && saved.isEmpty()) {
                 try {
                     if (runChatStream(markdownState)) {
-                        withFrameNanos { }
-                        listState.scrollToItem(messages.lastIndex)
-                        consumeStreamBuffer(markdownState) {
-                            withFrameNanos { }
-                            withFrameNanos { }
-                            listState.scrollToItem(messages.size + 1)
-                        }
+                        consumeStreamBuffer(markdownState)
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -199,18 +209,21 @@ class AiChatDemoPage : ComposeContainer() {
                 } finally {
                     activeRequest?.close()
                     activeRequest = null
+                    isStreaming = false
                     if (recompositionProfilerStarted) {
                         RecompositionProfiler.stop()
                         recompositionProfilerStarted = false
                     }
-                    isStreaming = false
                 }
             } else if (saved.isNotEmpty()) {
                 markdownState.reset()
                 markdownState.append(saved)
                 markdownState.finish()
+                withFrameNanos { }
+                scrollChatToBottom(listState)
                 status = "Completed (restored)"
                 restoredMarkdown = saved
+                autoFollow = true
             }
         }
 
@@ -226,16 +239,27 @@ class AiChatDemoPage : ComposeContainer() {
                 items(messages, key = { it.id }) { message ->
                     ChatBubble(message)
                 }
-                if (isStreaming || hasAnswer) {
-                    item(key = "live-answer") {
+                // Fixed item count: the answer grows inside one item and the footer
+                // is always the last index, so scrollToBottom has a stable target.
+                item(key = "live-answer") {
+                    if (isStreaming || hasAnswer) {
                         LiveAnswerLabel()
+                    } else {
+                        Spacer(modifier = Modifier.fillMaxWidth().height(0.dp))
                     }
-                    item(key = "markdown-answer") {
+                }
+                item(key = "markdown-answer") {
+                    if (isStreaming || hasAnswer) {
                         MarkdownAnswer(
                             markdownState = markdownState,
                             components = components,
                         )
+                    } else {
+                        Spacer(modifier = Modifier.fillMaxWidth().height(0.dp))
                     }
+                }
+                item(key = CHAT_LIST_FOOTER_KEY) {
+                    Spacer(modifier = Modifier.fillMaxWidth().height(12.dp))
                 }
             }
 
@@ -254,8 +278,9 @@ class AiChatDemoPage : ComposeContainer() {
                     }
                     messages = messages + ChatMessage(assistant = false, text = prompt)
                     markdownState.reset()
-                    autoFollowOutput = true
                     saveRestoredMarkdown("")
+                    autoFollow = true
+                    finalCommitPending = false
                     synchronized(pendingLock) { requestVersion++ }
                 },
                 onStop = {
@@ -351,7 +376,6 @@ class AiChatDemoPage : ComposeContainer() {
     /** Applies buffered deltas on the Compose frame loop, not in the network callback. */
     private suspend fun consumeStreamBuffer(
         markdownState: StreamingMarkdownState,
-        onFirstContent: suspend () -> Unit,
     ) {
         if (diagnosticsEnabled) {
             KLog.i(TAG, "consume enter streaming=$isStreaming finished=${streamFinished.value} pending=$pendingLength")
@@ -359,7 +383,6 @@ class AiChatDemoPage : ComposeContainer() {
             configureRecompositionProfiler()
         }
         var lastPublishAt = DateTime.currentTimestamp()
-        var firstContentPublished = false
         while (isStreaming || pendingLength > 0 || !streamFinished.value) {
             val now = DateTime.currentTimestamp()
             val tailLength = markdownState.activeTailLength
@@ -379,10 +402,7 @@ class AiChatDemoPage : ComposeContainer() {
                         KLog.i(TAG, "RCProfiler started at first正文 publish")
                     }
                     markdownState.append(delta)
-                    if (!firstContentPublished) {
-                        firstContentPublished = true
-                        onFirstContent()
-                    }
+                    withFrameNanos { }
                     if (diagnosticsEnabled) {
                         saveRestoredMarkdown(markdownState.content.toString())
                         val metrics = markdownState.diagnostics.value
@@ -399,28 +419,50 @@ class AiChatDemoPage : ComposeContainer() {
                 }
                 lastPublishAt = now
             }
-            if (streamFinished.value && pendingLength == 0) {
+            if (streamFinished.value && pendingLength == 0 && autoFollow) {
                 markdownState.finish()
+                withFrameNanos { }
                 saveRestoredMarkdown(markdownState.content.toString())
                 isStreaming = false
                 if (status == "Finishing") status = "Completed"
-                withFrameNanos { }
-                withFrameNanos { }
-                if (diagnosticsEnabled) {
-                    emitRecompositionProfilerReport()
-                    val metrics = markdownState.diagnostics.value
-                    val currentLinksRevision = markdownState.linksRevision.value
-                    val counters = markdownState.recompositionCounters
-                    KLog.i(
-                        TAG,
-                        "finish blocks=${metrics.stableBlockCount} " +
-                            "parity=${metrics.finalParseMatches} links=$currentLinksRevision " +
-                            "chars=${restoredMarkdown?.length} recompositions=${counters.snapshot()}",
-                    )
-                }
+                break
+            } else if (streamFinished.value && pendingLength == 0) {
+                finalCommitPending = true
+                status = "Reading history / completed"
                 break
             }
             delay(FRAME_INTERVAL_MS)
+        }
+    }
+
+    private fun isNearBottom(state: LazyListState): Boolean {
+        val info = state.layoutInfo
+        if (info.totalItemsCount <= 0) return true
+        val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return false
+        if (lastVisible.index < info.totalItemsCount - 2) return false
+        val remaining = (lastVisible.offset + lastVisible.size - info.viewportEndOffset)
+            .coerceAtLeast(0)
+        return remaining <= FOLLOW_BOTTOM_THRESHOLD_PX
+    }
+
+    /** Scrolls to the stable footer, then consumes the residual distance in finite steps. */
+    private suspend fun scrollChatToBottom(state: LazyListState) {
+        programmaticScrolling = true
+        try {
+            val lastIndex = (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+            state.scrollToItem(lastIndex)
+            withFrameNanos { }
+            repeat(4) {
+                val info = state.layoutInfo
+                val last = info.visibleItemsInfo.lastOrNull() ?: return
+                val delta = (last.offset + last.size - info.viewportEndOffset).coerceAtLeast(0)
+                if (delta <= 0) return
+                val consumed = state.scrollBy(delta.toFloat())
+                if (consumed <= 0f) return
+                withFrameNanos { }
+            }
+        } finally {
+            programmaticScrolling = false
         }
     }
 
@@ -474,13 +516,19 @@ class AiChatDemoPage : ComposeContainer() {
         recompositionProfilerStarted = false
     }
 
-    private fun chatConfig(): ChatConfig = ChatConfig(
-        apiUrl = pageData.params.optString(PAGE_DATA_API_URL, DEFAULT_API_URL),
-        apiKey = pageData.params.optString(PAGE_DATA_API_KEY).ifBlank {
-            pageData.params.optString("apiKey")
-        },
-        model = pageData.params.optString(PAGE_DATA_MODEL, DEFAULT_MODEL),
-    )
+    private fun chatConfig(): ChatConfig {
+        val params = pageData.params
+        val nestedParams = runCatching {
+            com.tencent.kuikly.core.nvi.serialization.json.JSONObject(params.optString("param"))
+        }.getOrNull()
+        fun value(key: String, fallback: String = ""): String =
+            params.optString(key, fallback).ifBlank { nestedParams?.optString(key, fallback) ?: fallback }
+        return ChatConfig(
+            apiUrl = value(PAGE_DATA_API_URL, DEFAULT_API_URL),
+            apiKey = value(PAGE_DATA_API_KEY),
+            model = value(PAGE_DATA_MODEL, DEFAULT_MODEL),
+        )
+    }
 
     @Composable
     private fun ChatHeader(statusText: String) {
@@ -624,6 +672,8 @@ class AiChatDemoPage : ComposeContainer() {
         const val PAGE_DATA_RESTORED_MARKDOWN = "aiChatRestoredMarkdown"
         const val PAGE_DATA_DIAGNOSTICS = "aiChatDiagnostics"
         const val STORAGE_KEY_MARKDOWN = "ai_chat_last_markdown"
+        const val CHAT_LIST_FOOTER_KEY = "__chat_footer__"
+        const val FOLLOW_BOTTOM_THRESHOLD_PX = 96
         const val PUBLISH_INTERVAL_MS = 50L
         const val FRAME_INTERVAL_MS = 16L
         const val DEFAULT_PROMPT =

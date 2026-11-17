@@ -44,6 +44,16 @@ class RecompositionCounters {
         activeTailBlockCompositions++
     }
 
+    /** Starts a new replay/session measurement without allocating a new state object. */
+    fun reset() {
+        screenCompositions = 0
+        stableRegionCompositions = 0
+        activeTailCompositions = 0
+        stableBlockCompositions = 0
+        activeTailBlockCompositions = 0
+        stableBatchCompositions = 0
+    }
+
     fun snapshot(): String =
         "screen=$screenCompositions stableRegion=$stableRegionCompositions " +
             "activeTail=$activeTailCompositions stableBlocks=$stableBlockCompositions " +

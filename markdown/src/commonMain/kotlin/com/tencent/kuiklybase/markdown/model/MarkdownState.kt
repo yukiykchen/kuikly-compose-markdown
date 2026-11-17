@@ -18,9 +18,11 @@ import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.parser.CancellationToken
-import org.intellij.markdown.parser.EmptyStreamingMarkdownFile
 import org.intellij.markdown.parser.MarkdownParser
-import org.intellij.markdown.parser.StreamingMarkdownFile
+import com.tencent.kuiklybase.markdown.compat.createMarkdownParser
+import com.tencent.kuiklybase.markdown.compat.CompatStreamingFile
+import com.tencent.kuiklybase.markdown.compat.createStreamingFile
+import com.tencent.kuiklybase.markdown.compat.parseMarkdown
 
 /**
  * A [MarkdownState] that executes the parsing of the markdown content with the [MarkdownParser] asynchronously.
@@ -37,7 +39,9 @@ fun rememberMarkdownState(
     lookupLinks: Boolean = true,
     isShareMode: Boolean = false,
     flavour: MarkdownFlavourDescriptor = remember { GFMFlavourDescriptor() },
-    parser: MarkdownParser = remember(flavour) { MarkdownParser(flavour, cancellationToken = CancellationToken.NonCancellable) },
+    parser: MarkdownParser = remember(flavour) {
+        createMarkdownParser(flavour, CancellationToken.NonCancellable)
+    },
     referenceLinkHandler: ReferenceLinkHandler = remember { ReferenceLinkHandlerImpl() },
 ): MarkdownState {
     val state = remember(lookupLinks, isShareMode, flavour, parser, referenceLinkHandler) {
@@ -78,7 +82,7 @@ class MarkdownState internal constructor(
     private val mutex = Mutex()
     private var streamSession = 0L
     private var streamRevision = 0L
-    private var streamingFile: StreamingMarkdownFile? = null
+    private var streamingFile: CompatStreamingFile? = null
     private var normalizedContent = StringBuilder()
 
     internal fun getContent(): String = input.content
@@ -107,7 +111,7 @@ class MarkdownState internal constructor(
         streamSession++
         resetStream()
         input.content = ""
-        streamingFile = EmptyStreamingMarkdownFile(
+        streamingFile = createStreamingFile(
             input.flavour,
             CancellationToken.NonCancellable,
         )
@@ -123,7 +127,7 @@ class MarkdownState internal constructor(
             input.content = ""
             nodeListState.clear()
             linkStateFlow.value = emptyMap()
-            streamingFile = EmptyStreamingMarkdownFile(
+            streamingFile = createStreamingFile(
                 input.flavour,
                 CancellationToken.NonCancellable,
             )
@@ -256,7 +260,7 @@ class MarkdownState internal constructor(
         return result.toString()
     }
 
-    private fun publishAst(file: StreamingMarkdownFile) {
+    private fun publishAst(file: CompatStreamingFile) {
         publishBlocks(
             file.stableChildren + file.unstableTail,
             stableCount = file.stableChildren.size,
@@ -280,8 +284,10 @@ class MarkdownState internal constructor(
      */
     private fun parseBlocking() {
         try {
-            val parsedResult: ASTNode = input.parser.buildMarkdownTreeFromString(
-                input.content as CharSequence,
+            val parsedResult: ASTNode = parseMarkdown(
+                input.flavour,
+                CancellationToken.NonCancellable,
+                input.content,
             )
             publishBlocks(parsedResult.children, stableCount = 0, updateLinks = true)
         } catch (error: Throwable) {

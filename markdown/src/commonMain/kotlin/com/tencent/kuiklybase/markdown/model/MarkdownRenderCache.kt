@@ -19,6 +19,7 @@ class MarkdownRenderCache {
         val source: String,
         val style: TextStyle,
         val annotatorSettings: AnnotatorSettings,
+        val generation: Int,
     )
 
     private data class Entry(
@@ -37,6 +38,7 @@ class MarkdownRenderCache {
         style: TextStyle,
         annotatorSettings: AnnotatorSettings,
         build: () -> AnnotatedString,
+        generation: Int = 0,
     ): AnnotatedString = synchronized(lock) {
         val end = node.endOffset.coerceAtMost(content.length)
         val start = node.startOffset.coerceIn(0, end)
@@ -47,6 +49,7 @@ class MarkdownRenderCache {
             content.substring(start, end),
             style,
             annotatorSettings,
+            generation,
         )
         val existing = entries[key]
         if (existing != null && existing.node === node) return@synchronized existing.value

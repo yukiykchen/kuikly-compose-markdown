@@ -3,6 +3,8 @@ plugins {
     id(libs.plugins.kotlin.android.get().pluginId)
 }
 
+import java.util.Properties
+
 android {
     namespace = "com.tencent.kuiklybase.markdown.app"
     compileSdk = 34
@@ -15,6 +17,31 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        val aiChatProps = Properties().also { props ->
+            rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { props.load(it) }
+        }
+        fun aiChatProperty(name: String, fallback: String): String =
+            (aiChatProps.getProperty(name) ?: fallback).replace("\"", "\\\"")
+        buildConfigField(
+            "String",
+            "AI_CHAT_API_URL",
+            "\"${aiChatProperty("aiChatApiUrl", "https://api.moonshot.cn/v1/chat/completions")}\"",
+        )
+        buildConfigField(
+            "String",
+            "AI_CHAT_MODEL",
+            "\"${aiChatProperty("aiChatModel", "kimi-k2.6")}\"",
+        )
+        buildConfigField(
+            "String",
+            "AI_CHAT_API_KEY",
+            "\"${aiChatProperty("aiChatApiKey", "")}\"",
+        )
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {

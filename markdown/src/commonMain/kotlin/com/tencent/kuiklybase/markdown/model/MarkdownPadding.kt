@@ -4,6 +4,8 @@ import androidx.compose.runtime.Immutable
 import com.tencent.kuikly.compose.foundation.layout.PaddingValues
 import com.tencent.kuikly.compose.ui.unit.Dp
 import com.tencent.kuikly.compose.ui.unit.dp
+import com.tencent.kuiklybase.markdown.model.MarkdownAlertPadding
+import com.tencent.kuiklybase.markdown.model.markdownAlertPadding
 
 interface MarkdownPadding {
     val block: Dp
@@ -25,6 +27,9 @@ interface MarkdownPadding {
     val blockQuoteBar: PaddingValues.Absolute
 
     val paragraphVerPadding: PaddingValues
+
+    /** Paddings of GitHub alerts. */
+    val alert: MarkdownAlertPadding get() = markdownAlertPadding()
 }
 
 @Immutable
@@ -38,7 +43,8 @@ private class DefaultMarkdownPadding(
     override val blockQuote: PaddingValues,
     override val blockQuoteText: PaddingValues,
     override val blockQuoteBar: PaddingValues.Absolute,
-    override val paragraphVerPadding: PaddingValues
+    override val paragraphVerPadding: PaddingValues,
+    override val alert: MarkdownAlertPadding,
 ) : MarkdownPadding
 
 fun markdownPadding(
@@ -58,7 +64,8 @@ fun markdownPadding(
         right = 4.dp,
         bottom = 2.dp
     ),
-    paragraphVerPadding: PaddingValues = PaddingValues(vertical = 8.dp)
+    paragraphVerPadding: PaddingValues = PaddingValues(vertical = 8.dp),
+    alert: MarkdownAlertPadding = markdownAlertPadding(),
 ): MarkdownPadding = DefaultMarkdownPadding(
     block = block,
     list = list,
@@ -69,7 +76,8 @@ fun markdownPadding(
     blockQuote = blockQuote,
     blockQuoteText = blockQuoteText,
     blockQuoteBar = blockQuoteBar,
-    paragraphVerPadding = paragraphVerPadding
+    paragraphVerPadding = paragraphVerPadding,
+    alert = alert,
 )
 
 fun MarkdownPadding.merge(
@@ -84,7 +92,8 @@ fun MarkdownPadding.merge(
     blockQuote: PaddingValues? = null,
     blockQuoteText: PaddingValues? = null,
     blockQuoteBar: PaddingValues.Absolute? = null,
-    paragraphVerPadding: PaddingValues? = null
+    paragraphVerPadding: PaddingValues? = null,
+    alert: MarkdownAlertPadding? = null,
 ): MarkdownPadding {
     return DefaultMarkdownPadding(
         block = block ?: this.block,
@@ -96,6 +105,7 @@ fun MarkdownPadding.merge(
         blockQuote = blockQuote ?: this.blockQuote,
         blockQuoteText = blockQuoteText ?: this.blockQuoteText,
         blockQuoteBar = blockQuoteBar ?: this.blockQuoteBar,
-        paragraphVerPadding = paragraphVerPadding ?: this.paragraphVerPadding
+        paragraphVerPadding = paragraphVerPadding ?: this.paragraphVerPadding,
+        alert = alert ?: this.alert,
     )
 }

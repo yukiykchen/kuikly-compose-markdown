@@ -4,7 +4,11 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import com.tencent.kuikly.compose.ui.graphics.Color
 import com.tencent.kuiklybase.markdown.compose.Markdown
+import com.tencent.kuiklybase.markdown.model.MarkdownAlertColors
+import com.tencent.kuiklybase.markdown.model.markdownAlertColors
 
+private val DEFAULT_HIGHLIGHT_TEXT = Color(0xFF202124)
+private val DEFAULT_HIGHLIGHT_BACKGROUND = Color(0xFFFFF44F)
 
 @Stable
 interface MarkdownColors {
@@ -29,6 +33,12 @@ interface MarkdownColors {
     /** Represents the color used for the inline background of code. */
     val inlineCodeBackground: Color
 
+    /** Text color of `==highlighted==` spans. */
+    val highlightText: Color get() = DEFAULT_HIGHLIGHT_TEXT
+
+    /** Background color of `==highlighted==` spans, rendered by Kuikly 2.30+ RichText spans. */
+    val highlightBackground: Color get() = DEFAULT_HIGHLIGHT_BACKGROUND
+
     /** Represents the color used for the color of dividers. */
     val dividerColor: Color
 
@@ -50,6 +60,9 @@ interface MarkdownColors {
 
     /** Background behind block quote content. [Color.Unspecified] means transparent. */
     val blockQuoteBackground: Color
+
+    /** Accent colors of GitHub alert types. */
+    val alertColors: MarkdownAlertColors get() = markdownAlertColors()
 }
 
 @Immutable
@@ -71,4 +84,7 @@ class DefaultMarkdownColors(
     override val tableStroke: Color = dividerColor,
     override val blockQuoteBar: Color = Color.Unspecified,
     override val blockQuoteBackground: Color = Color.Unspecified,
+    override val highlightText: Color = DEFAULT_HIGHLIGHT_TEXT,
+    override val highlightBackground: Color = DEFAULT_HIGHLIGHT_BACKGROUND,
+    override val alertColors: MarkdownAlertColors = markdownAlertColors(),
 ) : MarkdownColors

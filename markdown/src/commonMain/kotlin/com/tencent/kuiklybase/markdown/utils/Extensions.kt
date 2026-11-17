@@ -4,7 +4,9 @@ import androidx.compose.runtime.Composable
 import com.tencent.kuikly.compose.ui.graphics.Color
 import com.tencent.kuikly.compose.ui.text.SpanStyle
 import com.tencent.kuiklybase.markdown.compose.LocalMarkdownColors
+import com.tencent.kuiklybase.markdown.model.MarkdownColors
 import com.tencent.kuiklybase.markdown.model.MarkdownTypography
+import com.tencent.kuiklybase.markdown.model.ReferenceLinkHandler
 import org.intellij.markdown.IElementType
 import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.MarkdownTokenTypes
@@ -40,6 +42,38 @@ internal fun ASTNode.findChildOfTypeRecursive(type: IElementType): ASTNode? {
         }
     }
     return null
+}
+
+/** Resolves alt text for an IMAGE node across inline and reference forms. */
+fun ASTNode.resolveImageAlt(content: String): String? {
+    findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.let {
+        val text = it.getUnescapedTextInNode(content).trim('[', ']').trim()
+        if (text.isNotEmpty()) return text
+    }
+    findChildOfTypeRecursive(MarkdownElementTypes.LINK_LABEL)?.let {
+        val text = it.getUnescapedTextInNode(content).trim('[', ']').trim()
+        if (text.isNotEmpty()) return text
+    }
+    return null
+}
+
+/** Resolves inline or reference-style image destinations. */
+fun ASTNode.resolveImageLink(
+    content: String,
+    referenceLinkHandler: ReferenceLinkHandler?,
+): String? {
+    findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.let {
+        return normalizeMarkdownDestination(it.getTextInNode(content))
+    }
+    val refNode = findChildOfTypeRecursive(MarkdownElementTypes.FULL_REFERENCE_LINK)
+        ?: findChildOfTypeRecursive(MarkdownElementTypes.SHORT_REFERENCE_LINK)
+        ?: return null
+    val label = refNode.findChildOfType(MarkdownElementTypes.LINK_LABEL)
+        ?.getUnescapedTextInNode(content)
+        ?.trim('[', ']')
+        ?.trim()
+        ?: return null
+    return referenceLinkHandler?.find(label)?.takeIf { it.isNotEmpty() }
 }
 
 /**
@@ -88,7 +122,11 @@ internal fun normalizeMarkdownDestination(destination: CharSequence): String =
 fun List<ASTNode>.mapAutoLinkToType(targetType: IElementType = MarkdownTokenTypes.TEXT): List<ASTNode> {
     return map {
         if (it is LeafASTNode) {
-            if (it.type == GFMTokenTypes.GFM_AUTOLINK || it.type == MarkdownElementTypes.AUTOLINK) {
+            if (
+                it.type == GFMTokenTypes.GFM_AUTOLINK ||
+                it.type == MarkdownElementTypes.AUTOLINK ||
+                it.type.name == "EMAIL_AUTOLINK"
+            ) {
                 LeafASTNode(targetType, it.startOffset, it.endOffset)
             } else {
                 it
@@ -164,3 +202,7 @@ internal val MarkdownTypography.codeSpanStyle: SpanStyle
                 background = LocalMarkdownColors.current.inlineCodeBackground
             )
         }.toSpanStyle()
+
+/** Kuikly 2.30+ maps this background to a native RichText span background color. */
+internal val MarkdownColors.highlightSpanStyle: SpanStyle
+    get() = SpanStyle(color = highlightText, background = highlightBackground)

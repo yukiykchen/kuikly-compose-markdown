@@ -25,10 +25,11 @@ import com.tencent.kuiklybase.markdown.compose.extendedspans.internal.update
 /**
  * Draws round rectangles behind text annotated using `SpanStyle(background = …)`.
  *
- * [topMargin] and [bottomMargin] are placeholder values that will be automatically calculated from font metrics
- * in the future once Compose UI starts exposing them ([Issue tracker](https://issuetracker.google.com/u/1/issues/237428541)).
- * In the meantime, you can calculate these depending upon your text's font size and line height.
+ * Deprecated: Kuikly 2.30+ renders span backgrounds natively. The Kuikly
+ * `TextLayoutResult` port does not expose character bounding boxes, so this
+ * painter can only remove the background without drawing a replacement.
  */
+@Deprecated("Use Kuikly 2.30+ native SpanStyle.background rendering instead.")
 class RoundedCornerSpanPainter(
     private val cornerRadius: TextUnit = 8.sp,
     private val stroke: Stroke? = null,

@@ -23,7 +23,7 @@ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-c
 kotlinx-collections-immutable = { group = "org.jetbrains.kotlinx", name = "kotlinx-collections-immutable", version = "0.6.4" }
 kotlin-stdlib = { group = "org.jetbrains.kotlin", name = "kotlin-stdlib", version.ref = "kotlinStdlib" }
 
-kuikly-core-render-android = { module = "com.tencent.kuikly-open:core-render-android", version.ref = "kuikly-short" }
+kuikly-core-render-android = { module = "com.tencent.kuikly-open:core-render-android", version.ref = "kuikly" }
 kuikly-compose = { module = "com.tencent.kuikly-open:compose", version.ref = "kuikly-compose" }
 kuikly-core-annotation = { module = "com.tencent.kuikly-open:core-annotations", version.ref = "kuikly" }
 

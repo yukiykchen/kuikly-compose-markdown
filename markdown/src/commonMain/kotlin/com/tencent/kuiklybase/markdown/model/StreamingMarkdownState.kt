@@ -24,8 +24,8 @@ import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.parser.CancellationToken
 import org.intellij.markdown.parser.MarkdownParser
-import org.intellij.markdown.parser.EmptyStreamingMarkdownFile
-import org.intellij.markdown.parser.StreamingMarkdownFile
+import com.tencent.kuiklybase.markdown.compat.createStreamingFile
+import com.tencent.kuiklybase.markdown.compat.parseMarkdown
 
 /** Explicit work budgets for untrusted streaming input; violations never truncate text silently. */
 @Immutable
@@ -40,26 +40,38 @@ data class StreamingMarkdownLimits(
 }
 
 /**
- * Append-only streaming state. Each chunk is parsed by the official streaming
- * parser; stable AST nodes are cached and only the unstable tail is reparsed.
+ * Append-only streaming state. On parser 0.7.18 each chunk is parsed by the
+ * official append-only AST and only the unstable tail is reparsed. Older OHOS
+ * parser forks use a full-parse compatibility factory.
  */
 interface StreamingMarkdownState {
     val content: CharSequence
     val snapshot: StateFlow<Snapshot>
     val stableBlocks: StateFlow<List<MarkdownRenderBlock>>
     val stableBlockSlots: StateFlow<List<StableBlockSlot>>
+    val stableRenderSegments: StateFlow<List<MarkdownRenderSegment>>
     val unstableBlocks: StateFlow<List<MarkdownRenderBlock>>
     val hasRenderableBlocks: StateFlow<Boolean>
     val diagnostics: StateFlow<Diagnostics>
     val linksRevision: StateFlow<Int>
+    /** Per-block generation used to invalidate only stable segments affected by new links. */
+    val blockLinkGenerations: StateFlow<Map<Long, Int>>
+    /** Stable per-block generation flow; only the affected block observes a value change. */
+    fun blockLinkGeneration(blockId: Long): StateFlow<Int>
+    /** Active tail generation; tail blocks are small, so link changes can refresh the whole tail. */
+    val tailLinkGeneration: StateFlow<Int>
     val links: StateFlow<Map<String, String?>>
     val referenceLinkHandler: ReferenceLinkHandler
     val renderCache: MarkdownRenderCache
     val recompositionCounters: RecompositionCounters
+    /** Whether parsed deltas are currently committed to the UI state. */
+    val uiUpdatesEnabled: StateFlow<Boolean>
     /** Parser or upstream collection failure; reset clears it. */
     val error: StateFlow<Throwable?>
     /** Number of source characters in the current session, without copying the document. */
     val contentLength: Int get() = content.length
+    /** Snapshot-observable UI commit revision; host uses it for content-size bookkeeping. */
+    val contentRevision: StateFlow<Int>
     /** Current reparsed source size, for adaptive network buffering. */
     val activeTailLength: Int get() = unstableBlocks.value.sumOf { it.source.length }
 
@@ -67,6 +79,13 @@ interface StreamingMarkdownState {
     /** Flushes buffered line endings and publishes the final snapshot. */
     suspend fun finish(): Snapshot
     fun reset()
+    /**
+     * Temporarily holds UI commits while still appending and parsing source text.
+     * Useful when the host is scrolling or the user has scrolled away from the live answer.
+     */
+    fun pauseUiUpdates()
+    /** Commits the latest parsed state and resumes per-append UI commits. */
+    suspend fun resumeUiUpdates(): Snapshot
 
     @Immutable
     data class Snapshot(
@@ -154,15 +173,18 @@ internal class StreamingMarkdownStateImpl(
         var pendingCarriageReturn = false
         var appendCount = 0
         var processedStableChildren = 0
+        var pendingPublication: PendingPublication? = null
         val stableLinks = mutableMapOf<String, String?>()
         var stableRenderBlocks: List<MarkdownRenderBlock> = emptyList()
+        var stableRenderSegments: List<MarkdownRenderSegment> = emptyList()
+        var segmentedBlockCount = 0
         var stableAst: List<ASTNode> = emptyList()
         val slots = linkedMapOf<Long, StableBlockSlot>()
         val token = CancellationToken {
             job?.ensureActive()
             if (sessionFlow.value !== this) throw CancellationException("Markdown session was reset")
         }
-        val file = EmptyStreamingMarkdownFile(flavour, token)
+        val file = createStreamingFile(flavour, token)
     }
 
     override val contentLength: Int get() {
@@ -173,11 +195,18 @@ internal class StreamingMarkdownStateImpl(
     private val snapshotFlow = MutableStateFlow(StreamingMarkdownState.Snapshot(emptyList(), emptyList()))
     override val snapshot: StateFlow<StreamingMarkdownState.Snapshot> = snapshotFlow.asStateFlow()
 
+    private val contentRevisionFlow = MutableStateFlow(0)
+    override val contentRevision: StateFlow<Int> = contentRevisionFlow.asStateFlow()
+
     private val stableBlockFlow = MutableStateFlow(emptyList<MarkdownRenderBlock>())
     override val stableBlocks: StateFlow<List<MarkdownRenderBlock>> = stableBlockFlow.asStateFlow()
 
     private val stableBlockSlotFlow = MutableStateFlow(emptyList<StableBlockSlot>())
     override val stableBlockSlots: StateFlow<List<StableBlockSlot>> = stableBlockSlotFlow.asStateFlow()
+
+    private val stableRenderSegmentFlow = MutableStateFlow(emptyList<MarkdownRenderSegment>())
+    override val stableRenderSegments: StateFlow<List<MarkdownRenderSegment>> =
+        stableRenderSegmentFlow.asStateFlow()
 
     private val unstableBlockFlow = MutableStateFlow(emptyList<MarkdownRenderBlock>())
     override val unstableBlocks: StateFlow<List<MarkdownRenderBlock>> = unstableBlockFlow.asStateFlow()
@@ -191,10 +220,38 @@ internal class StreamingMarkdownStateImpl(
     private val linksRevisionFlow = MutableStateFlow(0)
     override val linksRevision: StateFlow<Int> = linksRevisionFlow.asStateFlow()
 
+    private val blockLinkGenerationFlow = MutableStateFlow<Map<Long, Int>>(emptyMap())
+    override val blockLinkGenerations: StateFlow<Map<Long, Int>> = blockLinkGenerationFlow.asStateFlow()
+
+    private val blockGenerationFlows = linkedMapOf<Long, MutableStateFlow<Int>>()
+    private val blockGenerationFlowLock = SynchronizedObject()
+
+    private val tailLinkGenerationFlow = MutableStateFlow(0)
+    override val tailLinkGeneration: StateFlow<Int> = tailLinkGenerationFlow.asStateFlow()
+
     private val linkFlow = MutableStateFlow<Map<String, String?>>(emptyMap())
     override val links: StateFlow<Map<String, String?>> = linkFlow.asStateFlow()
     private val errorFlow = MutableStateFlow<Throwable?>(null)
     override val error: StateFlow<Throwable?> = errorFlow.asStateFlow()
+    private val uiUpdatesEnabledFlow = MutableStateFlow(true)
+    override val uiUpdatesEnabled: StateFlow<Boolean> = uiUpdatesEnabledFlow.asStateFlow()
+
+    private class PendingPublication(
+        val stable: List<ASTNode>,
+        val tail: List<ASTNode>,
+        val links: Map<String, String?>,
+        val nextStable: List<MarkdownRenderBlock>,
+        val nextTail: List<MarkdownRenderBlock>,
+        val diagnostics: StreamingMarkdownState.Diagnostics?,
+    ) {
+        fun snapshot(finalChildren: List<ASTNode>? = null) = StreamingMarkdownState.Snapshot(
+            stableAst = stable,
+            unstableAstTail = if (finalChildren == null) tail else emptyList(),
+            finalized = finalChildren != null,
+            renderBlocks = MarkdownBlockList(nextStable, if (finalChildren == null) nextTail else emptyList()),
+            referenceDefinitions = links,
+        )
+    }
 
     override val renderCache = MarkdownRenderCache()
     override val recompositionCounters = RecompositionCounters()
@@ -226,7 +283,12 @@ internal class StreamingMarkdownStateImpl(
     override suspend fun finish(): StreamingMarkdownState.Snapshot = finishSession(sessionFlow.value)
 
     private suspend fun finishSession(session: Session): StreamingMarkdownState.Snapshot = mutate(session) {
-        if (session.finalized) return@mutate snapshotFlow.value
+        if (session.finalized) {
+            return@mutate synchronized(publicationLock) {
+                uiUpdatesEnabledFlow.value = true
+                snapshotFlow.value
+            }
+        }
         val trailing = normalize(session, "", isEnd = true)
         if (trailing.isNotEmpty()) {
             require(trailing.length <= limits.maxDocumentCharacters - session.source.length) {
@@ -240,10 +302,9 @@ internal class StreamingMarkdownStateImpl(
             session.file.append(trailing)
         }
         val document = synchronized(session.sourceLock) { session.source.toString() }
-        val tree = MarkdownParser(flavour, cancellationToken = session.token)
-            .buildMarkdownTreeFromString(document as CharSequence)
+        val tree = parseMarkdown(flavour, session.token, document)
         session.finalized = true
-        publishSnapshot(session, tree.children)
+        publishSnapshot(session, tree.children, forceCommit = true)
     }
 
     private suspend fun mutate(
@@ -273,14 +334,22 @@ internal class StreamingMarkdownStateImpl(
     override fun reset(): Unit = synchronized(publicationLock) {
         sessionFlow.value = Session()
         snapshotFlow.value = StreamingMarkdownState.Snapshot(emptyList(), emptyList())
+        contentRevisionFlow.value++
         stableBlockFlow.value = emptyList()
         stableBlockSlotFlow.value = emptyList()
+        stableRenderSegmentFlow.value = emptyList()
         unstableBlockFlow.value = emptyList()
         hasRenderableBlocksFlow.value = false
         diagnosticsFlow.value = StreamingMarkdownState.Diagnostics()
         linksRevisionFlow.value++
+        blockLinkGenerationFlow.value = emptyMap()
+        synchronized(blockGenerationFlowLock) {
+            blockGenerationFlows.values.forEach { it.value = 0 }
+        }
+        tailLinkGenerationFlow.value = 0
         linkFlow.value = emptyMap()
         errorFlow.value = null
+        uiUpdatesEnabledFlow.value = true
         referenceLinkHandler.clear()
         renderCache.clear()
     }
@@ -311,9 +380,37 @@ internal class StreamingMarkdownStateImpl(
         if (sessionFlow.value === session) errorFlow.value = failure
     }
 
+    override fun pauseUiUpdates() {
+        synchronized(publicationLock) {
+            uiUpdatesEnabledFlow.value = false
+        }
+    }
+
+    override suspend fun resumeUiUpdates(): StreamingMarkdownState.Snapshot {
+        val session = sessionFlow.value
+        return mutate(session) {
+            synchronized(publicationLock) {
+                val pending = session.pendingPublication
+                if (pending != null) {
+                    commitPublication(session, pending, finalChildren = null)
+                } else {
+                    uiUpdatesEnabledFlow.value = true
+                    snapshotFlow.value
+                }
+            }
+        }
+    }
+
+    override fun blockLinkGeneration(blockId: Long): StateFlow<Int> = synchronized(blockGenerationFlowLock) {
+        blockGenerationFlows.getOrPut(blockId) {
+            MutableStateFlow(blockLinkGenerationFlow.value[blockId] ?: 0)
+        }
+    }
+
     private fun publishSnapshot(
         session: Session,
         finalChildren: List<ASTNode>? = null,
+        forceCommit: Boolean = false,
     ): StreamingMarkdownState.Snapshot {
         val stable = finalChildren ?: if (session.file.stableChildren.size != session.stableAst.size) {
             session.file.stableChildren.toList().also { session.stableAst = it }
@@ -346,54 +443,134 @@ internal class StreamingMarkdownStateImpl(
         } else {
             previousBlocks
         }
+        val nextTail = tail.map { it.asRenderBlock(session.source) }
+        session.token.checkCancelled()
         val reused = if (diagnosticsEnabled) {
             nextStable.count { candidate -> session.slots[candidate.id]?.value === candidate }
         } else 0
-        val nextTail = tail.map { it.asRenderBlock(session.source) }
-        val next = StreamingMarkdownState.Snapshot(
-            stable, tail, finalChildren != null,
-            renderBlocks = MarkdownBlockList(nextStable, nextTail),
-            referenceDefinitions = links.toMap(),
+        val diagnostics = if (diagnosticsEnabled) {
+            val preview = session.file.children
+            StreamingMarkdownState.Diagnostics(
+                appendCount = session.appendCount,
+                stableBlockCount = nextStable.size,
+                unstableBlockCount = nextTail.size,
+                reusedStableBlocks = reused,
+                newStableBlocks = (nextStable.size - previousCount).coerceAtLeast(0),
+                finalParseMatches = finalChildren == null ||
+                    (preview.size == stable.size && preview.indices.all { preview[it].hasSameTree(stable[it]) }),
+            )
+        } else null
+        val pending = PendingPublication(
+            stable = stable,
+            tail = tail,
+            links = links.toMap(),
+            nextStable = nextStable,
+            nextTail = nextTail,
+            diagnostics = diagnostics,
         )
-        session.token.checkCancelled()
         return synchronized(publicationLock) {
             session.token.checkCancelled()
-            if (linkFlow.value != links) {
-                referenceLinkHandler.clear()
-                links.forEach { (key, value) -> referenceLinkHandler.store(key, value) }
-                session.token.checkCancelled()
-                linkFlow.value = links
-                linksRevisionFlow.value++
-                renderCache.clear()
+            if (uiUpdatesEnabledFlow.value || forceCommit) {
+                commitPublication(session, pending, finalChildren)
+            } else {
+                session.pendingPublication = pending
+                pending.snapshot(finalChildren)
             }
-            if (nextStable.size != previousCount || finalChildren != null) {
-                nextStable.forEach { block ->
-                    val slot = session.slots.getOrPut(block.id) { StableBlockSlot.create(block) }
-                    if (slot.value !== block) slot.replace(block)
-                }
-                session.stableRenderBlocks = nextStable
-                val ids = nextStable.mapTo(mutableSetOf()) { it.id }
-                session.slots.keys.retainAll(ids)
-                stableBlockFlow.value = nextStable
-                stableBlockSlotFlow.value = nextStable.map { session.slots.getValue(it.id) }
-            }
-            unstableBlockFlow.value = nextTail
-            hasRenderableBlocksFlow.value = nextStable.isNotEmpty() || nextTail.isNotEmpty()
-            if (diagnosticsEnabled) {
-                val preview = session.file.children
-                diagnosticsFlow.value = StreamingMarkdownState.Diagnostics(
-                    appendCount = session.appendCount,
-                    stableBlockCount = nextStable.size,
-                    unstableBlockCount = nextTail.size,
-                    reusedStableBlocks = reused,
-                    newStableBlocks = (nextStable.size - previousCount).coerceAtLeast(0),
-                    finalParseMatches = finalChildren == null ||
-                        (preview.size == stable.size && preview.indices.all { preview[it].hasSameTree(stable[it]) }),
-                )
-            }
-            snapshotFlow.value = next
-            next
         }
+    }
+
+    /** Commits one coalesced publication atomically. Must hold [publicationLock]. */
+    private fun commitPublication(
+        session: Session,
+        pending: PendingPublication,
+        finalChildren: List<ASTNode>?,
+    ): StreamingMarkdownState.Snapshot {
+        val previousCount = session.stableRenderBlocks.size
+        if (linkFlow.value != pending.links) {
+            val oldLinks = linkFlow.value
+            referenceLinkHandler.clear()
+            pending.links.forEach { (key, value) -> referenceLinkHandler.store(key, value) }
+            linkFlow.value = pending.links
+            linksRevisionFlow.value++
+            tailLinkGenerationFlow.value++
+            val changedLabels = (oldLinks.keys + pending.links.keys)
+                .filter { oldLinks[it] != pending.links[it] }
+                .filter { it.isNotEmpty() }
+                .flatMap { label ->
+                    val normalized = org.intellij.markdown.parser.LinkMap.normalizeLabel(label).toString()
+                    listOf(label, label.trim('[', ']'), normalized, normalized.trim('[', ']'))
+                }
+                .filter { it.isNotEmpty() }
+                .toSet()
+            if (changedLabels.isNotEmpty()) {
+                val generations = blockLinkGenerationFlow.value.toMutableMap()
+                val updated = linkedMapOf<Long, Int>()
+                (pending.nextStable + pending.nextTail).forEach { block ->
+                    if (block.usesAnyLinkLabel(changedLabels)) {
+                        val generation = (generations[block.id] ?: 0) + 1
+                        generations[block.id] = generation
+                        updated[block.id] = generation
+                    }
+                }
+                blockLinkGenerationFlow.value = generations
+                synchronized(blockGenerationFlowLock) {
+                    updated.forEach { (blockId, generation) ->
+                        blockGenerationFlows.getOrPut(blockId) { MutableStateFlow(0) }.value = generation
+                        while (blockGenerationFlows.size > MAX_BLOCK_GENERATION_FLOWS) {
+                            blockGenerationFlows.remove(blockGenerationFlows.keys.first())
+                        }
+                    }
+                }
+            }
+        }
+        val stableStructureChanged = pending.nextStable.size != previousCount ||
+            pending.nextStable !== session.stableRenderBlocks ||
+            finalChildren != null ||
+            session.pendingPublication != null
+        if (stableStructureChanged) {
+            pending.nextStable.forEach { block ->
+                val slot = session.slots.getOrPut(block.id) { StableBlockSlot.create(block) }
+                if (slot.value !== block) slot.replace(block)
+            }
+            session.stableRenderBlocks = pending.nextStable
+            val ids = pending.nextStable.mapTo(mutableSetOf()) { it.id }
+            session.slots.keys.retainAll(ids)
+            stableBlockFlow.value = pending.nextStable
+            stableBlockSlotFlow.value = pending.nextStable.map { session.slots.getValue(it.id) }
+            val byId = pending.nextStable.associateBy { it.id }
+            val retainedSegments = session.stableRenderSegments.map { segment ->
+                var changed = false
+                val blocks = segment.blocks.map { block ->
+                    val current = byId[block.id]
+                    if (current != null && current !== block) {
+                        changed = true
+                        current
+                    } else {
+                        block
+                    }
+                }
+                if (changed) segment.copy(blocks = blocks) else segment
+            }
+            val appendedSegments = pending.nextStable
+                .drop(session.segmentedBlockCount)
+                .asRenderSegments()
+            val segments = retainedSegments + appendedSegments
+            session.stableRenderSegments = segments
+            session.segmentedBlockCount = pending.nextStable.size
+            if (segments !== stableRenderSegmentFlow.value) {
+                stableRenderSegmentFlow.value = segments
+            }
+        }
+        unstableBlockFlow.value = if (finalChildren == null) pending.nextTail else emptyList()
+        hasRenderableBlocksFlow.value = pending.nextStable.isNotEmpty() ||
+            (finalChildren == null && pending.nextTail.isNotEmpty())
+        pending.diagnostics?.let { diagnosticsFlow.value = it }
+        val next = pending.snapshot(finalChildren)
+        snapshotFlow.value = next
+        contentRevisionFlow.value++
+        session.pendingPublication = null
+        uiUpdatesEnabledFlow.value = true
+        return next
     }
 
     // The parser requires LF; hold a trailing CR until the next chunk decides
@@ -425,3 +602,29 @@ internal class StreamingMarkdownStateImpl(
         return result.toString()
     }
 }
+
+/** Best-effort bracket-label scan; over-invalidating one bounded segment is safe. */
+private fun MarkdownRenderBlock.usesAnyLinkLabel(labels: Set<String>): Boolean {
+    var cursor = 0
+    while (cursor < source.length) {
+        val start = source.indexOf('[', cursor)
+        if (start < 0) return false
+        val end = source.indexOf(']', start + 1)
+        if (end < 0) return false
+        val raw = source.substring(start, end + 1)
+        val inner = source.substring(start + 1, end)
+        val normalizedRaw = org.intellij.markdown.parser.LinkMap.normalizeLabel(raw).toString()
+        val normalizedInner = org.intellij.markdown.parser.LinkMap.normalizeLabel(inner).toString()
+        if (labels.any {
+                it.equals(raw, ignoreCase = true) ||
+                    it.equals(inner, ignoreCase = true) ||
+                    it.equals(normalizedRaw, ignoreCase = true) ||
+                    it.equals(normalizedInner, ignoreCase = true)
+            }
+        ) return true
+        cursor = end + 1
+    }
+    return false
+}
+
+private const val MAX_BLOCK_GENERATION_FLOWS = 1024

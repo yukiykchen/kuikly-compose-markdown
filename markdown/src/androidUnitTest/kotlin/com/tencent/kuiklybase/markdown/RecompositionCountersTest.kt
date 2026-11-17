@@ -23,4 +23,22 @@ class RecompositionCountersTest {
         assertEquals(true, "stableRegion=1" in snapshot)
         assertEquals(true, "stableBatches=1" in snapshot)
     }
+
+    @Test
+    fun `reset clears every composition scope`() {
+        val counters = RecompositionCounters()
+        repeat(3) { counters.recordScreen() }
+        counters.recordStableRegion()
+        counters.recordActiveTail()
+        counters.recordStableBlock()
+        counters.recordActiveTailBlock()
+        counters.recordStableBatch()
+
+        counters.reset()
+
+        assertEquals(
+            "screen=0 stableRegion=0 activeTail=0 stableBlocks=0 tailBlocks=0 stableBatches=0",
+            counters.snapshot(),
+        )
+    }
 }

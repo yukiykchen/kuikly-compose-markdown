@@ -2,12 +2,17 @@
 
 这个 demo 用 Kuikly 2.30 的 `NetworkModule.httpStreamRequest()` 调用 OpenAI-compatible SSE 接口，并把 `choices[0].delta.content` 增量喂给本仓库的 `StreamingMarkdownState`，用于观察 AI 长 Markdown 回答在流式输出与滚动时的表现。
 
+标准仓库已把 `aiChat230Main` 纳入 `:demo` 的 `commonMain` / KSP，`@Page("ai_chat")` 会随 `:app` 一起注册；`app` 从被 `.gitignore` 忽略的 `local.properties` 读取 `aiChatApiKey` 并注入 `pageData`，源码不保存真实 key。Android Studio 直接 Run `com.tencent.kuiklybase.markdown.app` 即可打开 AI Chat。
+
 源码位置：
 
 - [AiChatDemoPage.kt](demo/src/aiChat230Main/kotlin/com/tencent/kuiklybase/markdown/AiChatDemoPage.kt)：`@Page("ai_chat")` 对话页。
 - [SseEventParser.kt](demo/src/aiChat230Main/kotlin/com/tencent/kuiklybase/markdown/SseEventParser.kt)：SSE 分片拼接、`data:` 行解析、OpenAI delta 提取。
 - [build-ai-chat-2.30.sh](build-ai-chat-2.30.sh)：把当前 Markdown 库源码和 AI 对话页挂到 Kotlin 2.1.21 / Kuikly 2.30 兼容工程壳，生成 debug APK。
-- [app/src/aiChat230](app/src/aiChat230)：2.30 构建使用的启动 Activity 与网络权限 manifest。
+- [MainActivity.kt](app/src/main/java/com/tencent/kuiklybase/markdown/MainActivity.kt)：正式 app 启动 `ai_chat`，注入 BuildConfig 中的 API 配置。
+- [app/build.gradle.kts](app/build.gradle.kts)：从 `local.properties` 生成 `BuildConfig` 字段。
+- [demo/build.gradle.kts](demo/build.gradle.kts)：把 `src/aiChat230Main/kotlin` 加入 `:demo` commonMain/KSP。
+- [build-ai-chat-2.30.sh](build-ai-chat-2.30.sh)：仍保留 Kuikly 2.30 独立工程壳，用于验证动态化宿主。
 
 ## 配置
 
@@ -17,7 +22,7 @@
 aiChatApiKey=<Moonshot API key>
 ```
 
-默认 API 地址与模型写在构建脚本里：`https://api.moonshot.cn/v1/chat/completions`、`kimi-k2.6`。Key 只进入本机 BuildConfig 和 pageData，不写进 Kotlin 源码。
+可选覆盖 `aiChatApiUrl` / `aiChatModel`；默认值为 `https://api.moonshot.cn/v1/chat/completions`、`kimi-k2.6`。Key 只进入本机 BuildConfig 和 pageData，不写进 Kotlin 源码，也不随 Git 提交。
 
 ## 构建
 
@@ -41,6 +46,12 @@ adb -s emulator-5556 shell am start -n com.kuikly.kuiklymarkdown/.KuiklyRenderAc
 ```
 
 APK 的包名沿用 2.30 工程壳的 `com.kuikly.kuiklymarkdown`，直接启动页为 `ai_chat`。页面底部有输入框与 Send 按钮；默认提示词会要求模型输出包含标题、列表、代码块、表格的较长 Markdown 回答，便于观察流式增量渲染和滚动流畅度。
+
+## 流式跟底策略
+
+AI Chat Demo 使用 KuiklyChatUI 的 sticky-bottom 结构：外层 `LazyColumn` 的 item 数量保持固定，回答标签、回答正文和固定 key 的 footer 始终是列表最后三个槽位；内容增长只改变 `markdown-answer` 的高度，不再按 `contentRevision` 追加零高度 slot。
+
+`contentRevision` 是自动跟底的更新时机：每次流式 UI commit 后等待布局帧，若 `autoFollow=true` 就调用同一个 `scrollChatToBottom()`，先 `scrollToItem(lastIndex)` 定位固定 footer，再按 `layoutInfo` 计算有限 residual delta 补齐到底。用户滚动离开近底时把 `autoFollow=false` 并暂停 UI commit，后台继续接收与解析；用户自己滑回近底时恢复 `autoFollow`、`resumeUiUpdates()` 合并发布，并补做延迟的 `finish()`。没有回底按钮，内容更新不会把正在看历史的用户拉回底部。
 
 ## 横竖屏切换
 
@@ -69,12 +80,12 @@ python3 scripts/emulator-smoke.py --serial emulator-5556 \
 
 ```bash
 bash scripts/production-gates.sh
-AI_CHAT_VARIANT=release AI_CHAT_LIBRARY_VERSION=0.4.3 bash build-ai-chat-2.30.sh
+AI_CHAT_VARIANT=release AI_CHAT_LIBRARY_VERSION=0.4.4 bash build-ai-chat-2.30.sh
 python3 scripts/emulator-smoke.py --serial emulator-5556 \
   --apk app/build/outputs/apk/release/app-ai-chat-2.30-release.apk \
   --output /tmp/markdown-release-validation --api-rounds 2 --lifecycle
 ```
 
-`AI_CHAT_LIBRARY_VERSION` 从 Maven 获取组件；`0.4.3` 已发布到公共仓库，远端-only 接入已验证。没有设置时仍使用源码副本便于开发。测试壳不携带旧 DSL parser/LaTeX 模块，避免重复类干扰。
+`AI_CHAT_LIBRARY_VERSION` 从 Maven 获取组件；Android-only 测试壳会解析 `com.tencent.kuiklybase:markdown-android:<version>`，不能直接把 KMP 根坐标 `markdown:<version>` 当成 Android AAR 依赖。`0.4.4` 已完成公共发布与远端-only consumer clean build 验证；`0.4.3` 是历史版本。不设置时仍使用源码副本便于开发。测试壳不携带旧 DSL parser/LaTeX 模块，避免重复类干扰。
 
 本地 API key 只用于这个测试 demo，虽不进入 Git，但会存在于测试 APK 的 BuildConfig。不要把该 APK 或客户端内嵌 key 作为生产 AI 服务；生产应通过自己的后端鉴权与代理调用模型。

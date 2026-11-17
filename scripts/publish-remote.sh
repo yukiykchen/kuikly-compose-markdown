@@ -10,7 +10,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 TARGET="$1"
-EXPECTED_VERSION="0.4.3"
+EXPECTED_VERSION="0.4.4"
 RESOLUTION_BASE="https://mirrors.tencent.com/nexus/repository/maven-tencent"
 case "$TARGET" in
   public)
